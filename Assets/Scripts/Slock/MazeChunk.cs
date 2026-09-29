@@ -79,6 +79,7 @@ namespace Slock
         public float FloorY { get; private set; }
         public float Z0 { get; private set; }
         public Tile[,] Tiles { get; private set; }
+        float[,] mainDepth;
 
         /// <summary>Pellets still uneaten in this section (main maze + side rooms); the gate opens at 0.</summary>
         public int PelletsLeft => pellets.Count;
@@ -104,6 +105,7 @@ namespace Slock
             public Vector2Int Key(int lx, int lz) => new(sign * (ix0 + lx), k0 + lz);
         }
         readonly List<SideRoom> rooms = new();
+        readonly List<Worm> slorms = new();
 
         public Vector2Int KeyAt(Vector3 world) =>
             new(Mathf.RoundToInt(world.x / TileSize), Mathf.RoundToInt((world.z - Z0) / TileSize));
@@ -142,6 +144,7 @@ namespace Slock
             var d = Difficulty.For(index);
 
             Tiles = GenerateLayout(rng, d, out var depth);
+            mainDepth = depth;
 
             var mb = new MeshBuilder(TileSize, Z0, FloorY);
             if (rng.NextDouble() < d.EdgeRoomChance) BuildEdgeRoom(mb, rng, d);
@@ -388,12 +391,24 @@ namespace Slock
         /// </summary>
         void AddSideRamp(MeshBuilder mb, float x0, float x1, float y0, float y1, int k, float upSign)
         {
+            AddSideRampGeometry(mb, x0, x1, y0, y1, k);
+            SpawnSideBoost(x0, x1, y0, y1, k, upSign);
+        }
+
+        /// <summary>Side-ramp prisms only (no booster objects), so the mesh can be rebuilt after a wall breach.</summary>
+        void AddSideRampGeometry(MeshBuilder mb, float x0, float x1, float y0, float y1, int k)
+        {
             float z = Z0 + k * TileSize, h = TileSize * 0.5f;
             float bot = Mathf.Min(y0, y1) - 3f;
             mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All);
             mb.PrismX(x0, x1, z - 3 * h, z - h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
             mb.PrismX(x0, x1, z + h, z + 3 * h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
+        }
 
+        /// <summary>Side-ramp booster trigger + chevrons.</summary>
+        void SpawnSideBoost(float x0, float x1, float y0, float y1, int k, float upSign)
+        {
+            float z = Z0 + k * TileSize;
             // Booster: a trigger over the ramp plus glowing chevrons pointing uphill.
             var go = new GameObject("Boost Ramp");
             go.transform.SetParent(transform, false);
@@ -451,6 +466,13 @@ namespace Slock
         /// booster so the slock always makes the Rise. No side rooms leave this ramp (it sits past the gate).</summary>
         void BuildClimbRamp(MeshBuilder mb)
         {
+            BuildClimbRampGeometry(mb);
+            SpawnClimbBoost();
+        }
+
+        /// <summary>Climb-ramp prisms only (no booster objects), so the mesh can be rebuilt after a wall breach.</summary>
+        void BuildClimbRampGeometry(MeshBuilder mb)
+        {
             float h = TileSize * 0.5f;
             float prevY = FloorYOf(Index - 1);
             float zA = Z0 - h, zB = Z0 + (RampTiles - 0.5f) * TileSize;
@@ -463,7 +485,14 @@ namespace Slock
 
             if (Index == 0) // back wall so you can't slide off the start
                 mb.Prism(-3 * h, 3 * h, zA - TileSize, zA, bot, WallHeight, bot, WallHeight, all, MeshBuilder.WallTopSub);
+        }
 
+        /// <summary>Climb-ramp booster trigger + chevrons. Skipped on the flat start section.</summary>
+        void SpawnClimbBoost()
+        {
+            float h = TileSize * 0.5f;
+            float prevY = FloorYOf(Index - 1);
+            float zA = Z0 - h, zB = Z0 + (RampTiles - 0.5f) * TileSize;
             if (FloorY <= prevY) return; // start section is flat: geometry only, no booster
             // Small booster over the slope, launching uphill (+Z) toward the maze.
             float midY = (prevY + FloorY) * 0.5f, midZ = (zA + zB) * 0.5f;
@@ -501,6 +530,45 @@ namespace Slock
             mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
                               | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
             mc.sharedMesh = mesh;
+        }
+
+        /// <summary>Blast one wall block (maze-local <paramref name="tx"/>, <paramref name="tz"/>) into open floor,
+        /// e.g. the slock's emergency slug. Rebuilds the mesh; adds no pellet, so the gate count is unchanged.</summary>
+        public bool TryBlastWall(int tx, int tz)
+        {
+            if (Tiles == null || tx < 0 || tx >= W || tz < 0 || tz >= L) return false;
+            if (Tiles[tx, tz] != Tile.Wall) return false;
+            Tiles[tx, tz] = Tile.Floor;
+            RebuildMesh();
+            return true;
+        }
+
+        /// <summary>Rebuild the render + collision mesh from the current tiles (geometry only: boosters are kept).</summary>
+        void RebuildMesh()
+        {
+            var mb = new MeshBuilder(TileSize, Z0, FloorY);
+            foreach (var r in rooms) // only left edge rooms exist; replay their prisms from the stored room
+            {
+                int rampLen = Mathf.Abs(r.ix0) - Center - 1;
+                float xNear = -(Center + 0.5f) * TileSize, xFar = xNear - rampLen * TileSize;
+                AddSideRampGeometry(mb, xFar, xNear, r.floorY, FloorY, r.k0 + r.entrance);
+                AddTiles(mb, r.t, r.depth, r.floorY, r.Key, r.sign);
+            }
+            AddTiles(mb, Tiles, mainDepth, FloorY, MainKey, 1);
+            BuildClimbRampGeometry(mb);
+            var mesh = mb.Build(name);
+            var mf = GetComponent<MeshFilter>();
+            if (mf != null)
+            {
+                if (mf.sharedMesh != null) Destroy(mf.sharedMesh);
+                mf.sharedMesh = mesh;
+            }
+            var mc = GetComponent<MeshCollider>();
+            if (mc != null)
+            {
+                mc.sharedMesh = null;
+                mc.sharedMesh = mesh;
+            }
         }
 
         // ------------------------------------------------------------------ contents
@@ -674,9 +742,14 @@ namespace Slock
                 else break;
                 var go = new GameObject("Worm");
                 go.transform.SetParent(transform, false);
-                go.AddComponent<Worm>().Init(this, cell, d.WormSpeed, rng.Next());
+                var worm = go.AddComponent<Worm>();
+                worm.Init(this, cell, d.WormSpeed, rng.Next());
+                slorms.Add(worm);
             }
         }
+
+        /// <summary>All slorms in this section (including eaten ones waiting to respawn).</summary>
+        public IReadOnlyList<Worm> Slorms => slorms;
 
         public static GameObject Decor(PrimitiveType type, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
         {

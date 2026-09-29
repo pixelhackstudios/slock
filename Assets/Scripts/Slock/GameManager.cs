@@ -35,6 +35,9 @@ namespace Slock
         float timeLeft, runSeconds, maxZ, flash;
         int bonusScore, height, pickups, pelletsEaten, wormsEaten, wormChain, pelletsHere;
         float powerUntil;
+        int slugs;                          // emergency shots: 1 per run, breaks one wall or kills one slorm
+        Vector2Int lastAim = new(0, 1);     // last tilt cardinal (N = +Z); default north
+        float runStartUnscaled;
 
         public bool PowerActive => state == State.Playing && Time.time < powerUntil;
         public float PowerRemaining => Mathf.Max(0f, powerUntil - Time.time);
@@ -163,6 +166,8 @@ namespace Slock
             runSeconds = maxZ = 0f;
             bonusScore = height = pickups = pelletsEaten = wormsEaten = wormChain = pelletsHere = 0;
             powerUntil = 0f;
+            slugs = 1;
+            lastAim = new Vector2Int(0, 1);
             popups.Clear();
         }
 
@@ -183,6 +188,7 @@ namespace Slock
             rig.ResetStick();
             CaptureMouse(true);
             Time.timeScale = 1f;
+            runStartUnscaled = Time.unscaledTime;
             Popup("GO!", Color.white, 1f);
         }
 
@@ -243,6 +249,7 @@ namespace Slock
                 case State.Playing:
                     if (esc) { SetPaused(true); break; }
                     if (kb != null && kb.rKey.wasPressedThisFrame) { StartRun(); break; }
+                    if (click && Time.unscaledTime - runStartUnscaled > 0.5f) TryFireSlug();
                     TickRun();
                     break;
 
@@ -379,6 +386,58 @@ namespace Slock
         void Popup(string text, Color color, float seconds) =>
             popups.Add((text, Time.unscaledTime + seconds, color));
 
+        /// <summary>Emergency slug (left click): one shot per run. Flies the tilt's cardinal (N/E/S/W),
+        /// killing the first slorm it touches or blasting one wall block open.</summary>
+        void TryFireSlug()
+        {
+            if (state != State.Playing || slock == null || rig == null) return;
+            if (slugs <= 0) { Popup("NO SLUG", Color.gray, 0.8f); return; }
+
+            var t = rig.Tilt;
+            Vector2Int step;
+            if (t.magnitude >= 0.25f)
+            {
+                step = Mathf.Abs(t.x) > Mathf.Abs(t.y)
+                    ? new Vector2Int(t.x > 0f ? 1 : -1, 0)
+                    : new Vector2Int(0, t.y > 0f ? 1 : -1);
+                lastAim = step;
+            }
+            else step = lastAim;
+            var dir = new Vector3(step.x, 0f, step.y);
+            slugs--;
+            Slug.Fire(worldRoot, slock.transform.position, dir, slock.Size, 8f * slock.Size, 24f * slock.Size);
+        }
+
+        /// <summary>A fired slug killed <paramref name="worm"/>: chain points plus its stolen time back.</summary>
+        public void OnSlugKillWorm(Worm worm)
+        {
+            if (state != State.Playing || worm == null || worm.Eaten) return;
+            int pts = 200 << Mathf.Min(wormChain, 3); // 200, 400, 800, 1600
+            wormChain++;
+            wormsEaten++;
+            bonusScore += pts;
+            float refund = worm.stolenTime;
+            worm.stolenTime = 0f;
+            if (refund > 0.05f) timeLeft += refund;
+            worm.GetEaten(WormRespawn);
+            string back = refund > 0.05f ? $"   +{refund:0}s back" : "";
+            Popup($"ZAPPED! +{pts}{back}", new Color(0.4f, 0.6f, 1f), 1.4f);
+        }
+
+        /// <summary>A fired slug hit a wall block: open it into floor (no pellet, gate count unchanged).</summary>
+        public void OnSlugBlastWall(MazeChunk chunk, int tx, int tz)
+        {
+            if (state != State.Playing || chunk == null) return;
+            if (chunk.TryBlastWall(tx, tz)) Popup("BREACHED!", Color.white, 1.2f);
+        }
+
+        /// <summary>A fired slug ran out of range without hitting anything.</summary>
+        public void OnSlugFizzle()
+        {
+            if (state != State.Playing) return;
+            Popup("MISS...", Color.gray, 0.8f);
+        }
+
         void Submit()
         {
             playerName = string.IsNullOrWhiteSpace(playerName) ? "SLOCK" : playerName.Trim().ToUpperInvariant();
@@ -440,6 +499,8 @@ namespace Slock
                 Text(new Rect(w - 440, 140, 400, 30), $"BLOCK  {MazeChunk.BlockOf(height)}", label, new Color(1f, 1f, 1f, 0.7f), TextAnchor.UpperRight);
                 Text(new Rect(w - 440, 112, 400, 30), pelletsHere > 0 ? $"PELLETS LEFT  {pelletsHere}" : "GATE OPEN", label,
                     new Color(1f, 0.92f, 0.7f), TextAnchor.UpperRight);
+                Text(new Rect(w - 440, 168, 400, 30), slugs > 0 ? "SLUG READY — CLICK FIRES (aim with tilt)" : "SLUG SPENT", label,
+                    new Color(1f, 1f, 1f, 0.7f), TextAnchor.UpperRight);
                 if (PowerActive)
                     Text(new Rect(w / 2 - 200, 112, 400, 30), $"POWER  {PowerRemaining:0.0}", label, new Color(0.45f, 0.6f, 1f), TextAnchor.UpperCenter);
 
