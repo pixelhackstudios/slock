@@ -456,7 +456,11 @@ namespace Slock
             gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = gameObject.AddComponent<MeshRenderer>();
             mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop };
-            gameObject.AddComponent<MeshCollider>().sharedMesh = mesh;
+            // MeshBuilder emits each quad with its own vertices; weld them so the collision surface is one clean mesh.
+            var mc = gameObject.AddComponent<MeshCollider>();
+            mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
+                              | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
+            mc.sharedMesh = mesh;
         }
 
         // ------------------------------------------------------------------ contents

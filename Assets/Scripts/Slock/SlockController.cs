@@ -12,7 +12,7 @@ namespace Slock
         /// <summary>Width of the block: always exactly one grid block of the section it's in.</summary>
         public float Size { get; private set; } = 1f;
         public float Height => Size * 1.1f;      // a hair taller than the walls (which are Size tall)
-        const float Clearance = 0.04f;           // physics box is a hair smaller (fraction of Size) so it never jams
+        const float Clearance = 0.04f;           // physics hull is a hair smaller (fraction of Size) so it never jams
         // Compensation for this collider's flat-face contact patch: measured (SlockResponseProbe), a sliding box here is
         // slowed by exactly twice the material's friction coefficient (PhysX friction patches use multiple contact points).
         // The material gets half of ControlSettings.Friction so that value is the real mu. Re-measure if the collider shape changes.
@@ -21,7 +21,8 @@ namespace Slock
 
         float targetSize = 1f;
         float gridTs = 1f, gridZ0;               // the grid we're locked to (current section)
-        BoxCollider box;
+        Transform hull;                          // the single convex collision body (a child so it can scale with the slock)
+        Collider hullCollider;
         Transform visual;
 
         public float holeSnap = 14f;       // how fast it lines up with a hole it's dropping into
@@ -35,8 +36,14 @@ namespace Slock
         public static SlockController Create()
         {
             var go = new GameObject("Slock") { layer = SelfLayer };
-            var box = go.AddComponent<BoxCollider>();
-            box.material = new PhysicsMaterial("Slock")
+
+            // One convex, rounded-corner collision hull (the low-poly jelly, slightly inset) so wall corners and
+            // ramp lips deflect the block instead of snagging it like a sharp box would.
+            var hullGo = new GameObject("Collider") { layer = SelfLayer };
+            hullGo.transform.SetParent(go.transform, false);
+            var hullCollider = hullGo.AddComponent<MeshCollider>();
+            hullCollider.convex = true;
+            hullCollider.material = new PhysicsMaterial("Slock")
             {
                 dynamicFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
                 staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
@@ -46,6 +53,7 @@ namespace Slock
             };
 
             // Jelly body: the rounded Blender cube if present (Resources/Slock/SlockJelly.fbx), else a plain cube.
+            var hullMesh = Resources.Load<Mesh>("Slock/SlockJellyLow") ?? Resources.Load<Mesh>("Slock/SlockJelly");
             var body = new GameObject("Jelly") { layer = SelfLayer };
             body.transform.SetParent(go.transform, false);
             var jellyMesh = Resources.Load<Mesh>("Slock/SlockJelly");
@@ -55,6 +63,7 @@ namespace Slock
                 jellyMesh = tmp.GetComponent<MeshFilter>().sharedMesh;
                 Destroy(tmp);
             }
+            hullCollider.sharedMesh = hullMesh != null ? hullMesh : jellyMesh; // the full jelly is over PhysX's convex limit
             body.AddComponent<MeshFilter>().sharedMesh = jellyMesh;
             body.AddComponent<MeshRenderer>().sharedMaterial = Visuals.SlockJelly;
             var jelly = body.AddComponent<JellyWobble>();
@@ -70,7 +79,8 @@ namespace Slock
 
 
             var s = go.AddComponent<SlockController>();
-            s.box = box;
+            s.hull = hullGo.transform;
+            s.hullCollider = hullCollider;
             s.visual = body.transform;
             s.SetSizeImmediate(1f);
             return s;
@@ -91,7 +101,7 @@ namespace Slock
         void ApplySize(float size)
         {
             Size = size;
-            box.size = new Vector3(size * (1f - Clearance), Height, size * (1f - Clearance));
+            hull.localScale = new Vector3(size * (1f - Clearance), Height, size * (1f - Clearance));
             visual.localScale = new Vector3(size, Height, size);
         }
 
@@ -127,7 +137,7 @@ namespace Slock
                 ApplySize(Mathf.MoveTowards(Size, targetSize, shrinkSpeed * Time.fixedDeltaTime));
 
             // Live-tunable from the pause screen. Friction is the only resistance: gravity does all the pushing.
-            box.sharedMaterial.dynamicFriction = box.sharedMaterial.staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation;
+            hullCollider.sharedMaterial.dynamicFriction = hullCollider.sharedMaterial.staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation;
             var p = Body.position;
             var v = Body.linearVelocity;
             Body.constraints = RigidbodyConstraints.FreezeRotation;

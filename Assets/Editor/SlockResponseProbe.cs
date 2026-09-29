@@ -60,7 +60,7 @@ public class SlockResponseProbeBehaviour : MonoBehaviour
     Vector2 dirFwd, dirRight;      // tilt-space vectors that push toward +z and +x
     readonly List<Sample> log = new();
     string outDir;
-    float initialVz;
+    float initialVz, startZ;
 
     IEnumerator Start()
     {
@@ -111,7 +111,82 @@ public class SlockResponseProbeBehaviour : MonoBehaviour
         // (wall-free floor: slock heads where gravity points)
         AnalyseDiagonal("diagonal");
 
+        // E4/E5: snagging. Same tests with the old sharp box and with the rounded hull.
+        foreach (bool legacyBox in new[] { true, false })
+        {
+            UseLegacyBox(legacyBox);
+            string label = legacyBox ? "sharp box" : "rounded hull";
+            floor.SetActive(false);
+            var seamFloor = BuildBlockFloor(30, 30);
+            initialVz = 10f;
+            yield return Scenario("seams", 2.5f, t => Vector2.zero);
+            initialVz = 0f;
+            float vStart = Mean(0.1f, 0.2f, s => s.vz), vEnd = Mean(2.3f, 2.4f, s => s.vz);
+            float expected = ControlSettings.Friction * ControlSettings.FallGravity * 2.2f;
+            float maxVy = MaxAbs(s => s.vy);
+            Debug.Log($"[probe] seams ({label}): coasting over {seamFloor.name}: speed {vStart:0.00} -> {vEnd:0.00}, friction alone predicts loss {expected:0.00}, actual loss {vStart - vEnd:0.00} m/s | worst bounce {maxVy:0.000} m/s vertical");
+            Destroy(seamFloor);
+
+            // Entering a side opening while not perfectly centred on it. Wall along +x with a one-tile gap at z=11.5..12.5;
+            // the slock starts at rest beside the gap (offset dz from its centre) and the world tilts toward the gap.
+            floor.SetActive(true);
+            var walls = new List<GameObject>();
+            void Block(float x0, float x1, float z0, float z1)
+            {
+                var w = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                w.transform.position = new Vector3(OriginX + (x0 + x1) * 0.5f, 0.5f, (z0 + z1) * 0.5f);
+                w.transform.localScale = new Vector3(x1 - x0, 1f, z1 - z0);
+                walls.Add(w);
+            }
+            Block(0.5f, 1.5f, -3f, 11.5f);
+            Block(0.5f, 1.5f, 12.5f, 40f);
+            Block(1.5f, 2.5f, 11.5f, 12.5f);
+            var results = new StringBuilder();
+            foreach (float dz in new[] { 0f, 0.02f, 0.04f, 0.06f, 0.08f, 0.10f, 0.14f })
+            {
+                startZ = 12f + dz;
+                yield return Scenario("opening", 2.5f, t => dirRight * 0.5f);
+                float xEnd = log[log.Count - 1].px;
+                results.Append($" dz={dz:0.00}: {(xEnd > 0.8f ? "IN" : "STUCK")}({xEnd:0.00})");
+            }
+            startZ = 0f;
+            Debug.Log($"[probe] side opening, offset from centre -> entered? ({label}):{results}");
+            foreach (var w in walls) Destroy(w);
+        }
+        UseLegacyBox(false);
+
         SlockResponseProbe.Finish();
+    }
+
+
+    GameObject BuildBlockFloor(int nx, int nz)
+    {
+        // The game's own floor construction: one prism per tile through MeshBuilder, cooked as the maze does.
+        var mb = new MeshBuilder(1f, 0f, 0f);
+        for (int ix = -nx / 2; ix < nx / 2; ix++)
+            for (int iz = 0; iz < nz; iz++)
+                mb.Prism(OriginX + ix - 0.5f, OriginX + ix + 0.5f, iz - 0.5f, iz + 0.5f, -1f, 0f, -1f, 0f, MeshBuilder.Faces.Top);
+        var go = new GameObject("blockfloor");
+        var mc = go.AddComponent<MeshCollider>();
+        mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
+                          | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
+        mc.sharedMesh = mb.Build("blockfloor");
+        return go;
+    }
+
+    BoxCollider legacyBox;
+    void UseLegacyBox(bool on)
+    {
+        var hull = slock.transform.Find("Collider");
+        var hullCol = hull.GetComponent<MeshCollider>();
+        hullCol.enabled = !on;
+        if (legacyBox == null)
+        {
+            legacyBox = slock.gameObject.AddComponent<BoxCollider>();
+            legacyBox.sharedMaterial = hullCol.sharedMaterial;
+        }
+        legacyBox.enabled = on;
+        legacyBox.size = new Vector3(0.96f, 1.1f, 0.96f);
     }
 
     IEnumerator Scenario(string name, float duration, Func<float, Vector2> command)
@@ -120,7 +195,7 @@ public class SlockResponseProbeBehaviour : MonoBehaviour
         rig.inputEnabled = false;
         slock.SetSizeImmediate(1f);
         slock.SetGrid(1f, 0f);
-        slock.ResetTo(new Vector3(OriginX, slock.Height * 0.5f + 0.02f, 0f));
+        slock.ResetTo(new Vector3(OriginX, slock.Height * 0.5f + 0.02f, startZ));
         rig.overrideTilt = Vector2.zero;
         rig.SnapToTarget();
         slock.Body.linearVelocity = new Vector3(0, 0, initialVz);
