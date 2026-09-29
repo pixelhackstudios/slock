@@ -67,6 +67,7 @@ namespace Slock
             worldRoot = new GameObject("World").transform;
             slock = SlockController.Create();
             rig.target = slock.transform;
+            slock.TiltRig = rig;
 
             NewWorld();
             state = State.Title;
@@ -465,7 +466,7 @@ namespace Slock
                     Text(new Rect(60, h * 0.4f, w * 0.4f, 80), "PAUSED", big, Color.white, TextAnchor.MiddleLeft);
                     Text(new Rect(60, h * 0.4f + 70, w * 0.45f, 30), "ESC to resume  ·  R to restart  ·  Q to quit", small, Color.white, TextAnchor.MiddleLeft);
                     Text(new Rect(60, h * 0.4f + 100, w * 0.45f, 60), "Tweak the controls on the right, then ESC to try them.", small, new Color(1, 1, 1, 0.7f), TextAnchor.UpperLeft);
-                    DrawControlsPanel(new Rect(w - 600, 190, 560, Mathf.Min(h - 230, 760)));
+                    DrawControlsPanel(new Rect(w - 600, 190, 560, Mathf.Min(h - 230, 840)));
                     break;
 
                 case State.GameOver:
@@ -578,7 +579,8 @@ namespace Slock
                 changed |= Slider(ref y, x, w, "Auto-level", ref ControlSettings.Recenter, 0f, 3f, "board drifts back to level when you stop moving");
             changed |= Slider(ref y, x, w, "Tilt response time", ref ControlSettings.TiltSmoothing, 0f, 0.3f, "lower = board follows the mouse instantly");
             changed |= Slider(ref y, x, w, "Max tilt (degrees)", ref ControlSettings.MaxTilt, 8f, 35f, "how steep the board gets");
-            changed |= Slider(ref y, x, w, "Push (gravity)", ref ControlSettings.Gravity, 15f, 80f, "how hard a tilt accelerates the slock");
+            changed |= Slider(ref y, x, w, "Fall gravity", ref ControlSettings.FallGravity, 5f, 80f, "straight-down acceleration while falling");
+            changed |= Slider(ref y, x, w, "Tilt acceleration", ref ControlSettings.TiltAcceleration, 0f, 80f, "horizontal steering while grounded");
             changed |= Slider(ref y, x, w, "Braking", ref ControlSettings.SlideDrag, 0.3f, 5f, "higher = stops sooner & slower top speed");
             changed |= Slider(ref y, x, w, "Top speed", ref ControlSettings.MaxSpeed, 5f, 25f, "hard speed limit");
             changed |= Slider(ref y, x, w, "Grid lock", ref ControlSettings.LaneSpring, 20f, 150f, "how firmly it's held on its row");
