@@ -479,7 +479,7 @@ namespace Slock
             Dim(0.6f);
             Text(new Rect(0, h * 0.1f, w, 80), endReason.ToUpperInvariant(), big, Red, TextAnchor.MiddleCenter);
             Text(new Rect(0, h * 0.1f + 70, w, 30),
-                $"score {Score:N0}   ·   floor {height}   ·   {pelletsEaten} pellets   ·   {wormsEaten} worms eaten   ·   {runSeconds:0}s", label, Color.white, TextAnchor.MiddleCenter);
+                $"score {Score:N0}   ·   floor {height}   ·   {pelletsEaten} pellets   ·   {wormsEaten} slorms eaten   ·   {runSeconds:0}s", label, Color.white, TextAnchor.MiddleCenter);
 
             float y = h * 0.1f + 120;
             if (canSubmit && submittedRank == 0)

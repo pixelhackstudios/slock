@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// A green jelly worm that inches through the maze like a telescope: the slock-sized head slides one block
+    /// A slorm: a green block worm that inches through the maze like a telescope: the slock-sized head slides one block
     /// and pauses, and each smaller block behind eases toward the one in front of it, tucking in behind (and
     /// inside) the head; when the head moves on, the tail stretches back out. Nothing rotates: the blocks stay
     /// square to the grid. Touching it knocks the slock away and costs time, unless a power gem is active,
@@ -48,20 +48,20 @@ namespace Slock
             col.isTrigger = true;
             col.radius = size * 0.45f;
 
-            AddBlock(transform, 1f, true);
+            AddBlock(transform, 1f, "Head");
             foreach (var s in SegmentScale)
             {
-                var seg = AddBlock(chunk.transform, s, false);
+                var seg = AddBlock(chunk.transform, s, "Segment");
                 seg.position = FloorPoint(transform.position, s);
                 body.Add(seg);
             }
             PickNext();
         }
 
-        Transform AddBlock(Transform parent, float scale, bool withCore)
+        Transform AddBlock(Transform parent, float scale, string blockName)
         {
             var mesh = Resources.Load<Mesh>("Slock/SlockJellyLow") ?? Resources.Load<Mesh>("Slock/SlockJelly");
-            var go = new GameObject(withCore ? "Head" : "Segment");
+            var go = new GameObject(blockName);
             go.transform.SetParent(parent, false);
             go.transform.localScale = new Vector3(size, height, size) * scale;
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
@@ -70,12 +70,6 @@ namespace Slock
             go.AddComponent<JellyWobble>();
             jellies.Add(r);
             allRenderers.Add(r);
-            if (withCore)
-            {
-                var core = MazeChunk.Decor(PrimitiveType.Cube, go.transform, Vector3.zero, Vector3.one * 0.45f, Visuals.WormCore);
-                core.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                allRenderers.Add(core.GetComponent<MeshRenderer>());
-            }
             return go.transform;
         }
 
