@@ -6,7 +6,7 @@ Turn the TextureMap.app PBR sets in this folder into Unity-ready tile textures.
 Works at any image size (e.g. 128x128 or 1254x1254). For each set (floor, tops, walls) it crops every map to
 the panel's frame lines, so the pattern tiles with its lines on block edges, keeps roughly the source
 resolution (rounded up to a power of two, which Unity prefers) and writes to Assets/Textures/Tiles/:
-    <set>_base.png         greyscale albedo (the AO map; there is no colour map yet)
+    <set>_base.png         colour, from the set's own image (e.g. slock-floor.png); falls back to the grey AO map
     <set>_normal.png       normal map (OpenGL +Y, which is what Unity expects)
     <set>_metalsmooth.png  URP Lit "metallic" map: R = metallic, A = smoothness (1 - roughness)
     <set>_ao.png           ambient occlusion
@@ -57,10 +57,15 @@ for kind, frac in CROPS.items():
         return source(name).crop(box).resize((size, size), Image.LANCZOS)
 
     ao = load("ambient-occlusion").convert("L")
-    ao.convert("RGB").save(os.path.join(OUT, f"{kind}_base.png"))
+    colour_files = glob.glob(d + f"slock-{kind}.png")          # the original colour image, if present
+    base = colour_files[0] if colour_files else None
+    if base:
+        Image.open(base).convert("RGB").crop(box).resize((size, size), Image.LANCZOS).save(os.path.join(OUT, f"{kind}_base.png"))
+    else:
+        ao.convert("RGB").save(os.path.join(OUT, f"{kind}_base.png"))
     ao.save(os.path.join(OUT, f"{kind}_ao.png"))
     load("normal-map").convert("RGB").save(os.path.join(OUT, f"{kind}_normal.png"))
     metal = load("metallic").convert("L")
     smooth = Image.fromarray(255 - np.asarray(load("roughness").convert("L")))
     Image.merge("RGBA", (metal, metal, metal, smooth)).save(os.path.join(OUT, f"{kind}_metalsmooth.png"))
-    print(f"{kind}: {w}x{h} source -> {size}x{size} tile")
+    print(f"{kind}: {w}x{h} source -> {size}x{size} tile, colour from {os.path.basename(base) if base else 'AO map (no colour image found)'}")
