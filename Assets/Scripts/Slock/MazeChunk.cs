@@ -1,0 +1,667 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Slock
+{
+    public enum Tile : byte { Void, Floor, Wall }
+
+    /// <summary>
+    /// One procedurally generated section of the endless course: an entry ramp climbing from the previous
+    /// chunk's height, then a W x L tile maze with rooms, pits, open edges, pellets, gems and worms.
+    /// Chunks are laid end to end along +Z, each one <see cref="Rise"/> higher than the last.
+    ///
+    /// "Resolution" climbs as you go: every gate shrinks the block size by <see cref="BlockStep"/> (60 -> 58 -> 56 ...),
+    /// while a section keeps roughly the same footprint, so each section has more, smaller cells than the last.
+    ///
+    /// Side rooms hang off a section at a lower level: one off the maze's left edge, and one off a landing halfway
+    /// up the climbing ramp (right side). Each is reached by a ramp you slide down, which boosts you back up.
+    /// Their pellets count toward opening the gate; they also hold a power gem and either a big clock or a gate key.
+    ///
+    /// Positions use "keys": (ix, k) where world x = ix * TileSize and world z = Z0 + k * TileSize.
+    /// The ramp occupies rows k = 0..RampTiles-1, the main maze rows k = RampTiles..RampTiles+L-1.
+    /// </summary>
+    public class MazeChunk : MonoBehaviour
+    {
+        public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
+        const float BaseWidth = 15f, BaseLength = 21f, RampLength = 6f;
+        public const float Rise = 1.0f;
+        const float SideDrop = 1.5f;       // how far below its entrance a side room sits
+
+        /// <summary>Block size of section <paramref name="index"/> in "resolution units" (60 at the start).</summary>
+        public static int BlockOf(int index) => Mathf.Max(MinBlock, BaseBlock - BlockStep * Mathf.Max(0, index));
+        /// <summary>World size of one grid block (and of the slock) in section <paramref name="index"/>.</summary>
+        public static float TileSizeOf(int index) => BlockOf(index) / (float)BaseBlock;
+        static int Odd(float v) { int n = Mathf.RoundToInt(v); return n % 2 == 0 ? n + 1 : n; }
+        static int WOf(int i) => Odd(BaseWidth / TileSizeOf(i));
+        static int LOf(int i) => Odd(BaseLength / TileSizeOf(i));
+        static int RampOf(int i) => Mathf.Max(4, Mathf.RoundToInt(RampLength / TileSizeOf(i)));
+        static float LengthOf(int i) => (RampOf(i) + LOf(i)) * TileSizeOf(i);
+
+        // Where each section's ramp begins along Z (cumulative, since sections differ in length).
+        static readonly List<float> startEdges = new() { -0.5f }; // section 0: half its (size 1) first tile
+        static float StartEdgeOf(int i)
+        {
+            while (startEdges.Count <= i) startEdges.Add(startEdges[^1] + LengthOf(startEdges.Count - 1));
+            return startEdges[i];
+        }
+
+        public static float FloorYOf(int index) => Mathf.Max(0, index) * Rise;
+        public static float StartZOf(int index) => StartEdgeOf(Mathf.Max(0, index)) + TileSizeOf(index) * 0.5f;
+        public static int IndexAt(float z)
+        {
+            int i = 0;
+            while (z >= StartEdgeOf(i + 1)) i++;
+            return i;
+        }
+
+        // Per-section grid dimensions.
+        public int W { get; private set; }         // odd, so the centre column is a maze cell
+        public int L { get; private set; }         // odd
+        public int RampTiles { get; private set; }
+        public float TileSize { get; private set; }
+        public float WallHeight => TileSize;       // blocks are cubes
+        public int Center => W / 2;
+
+        public int Index { get; private set; }
+        public float FloorY { get; private set; }
+        public float Z0 { get; private set; }
+        public Tile[,] Tiles { get; private set; }
+
+        /// <summary>Pellets still uneaten in this section (main maze + side rooms); the gate opens at 0.</summary>
+        public int PelletsLeft => pellets.Count;
+        public bool GateOpen => gate == null;
+
+        class Pellet { public GameObject go; public bool gold; }
+        readonly Dictionary<Vector2Int, Pellet> pellets = new();
+        readonly HashSet<Vector2Int> reserved = new();     // keys holding a pickup: no pellet there
+        struct Floater { public Transform t; public Vector3 home; public float phase, spin, bob; }
+        readonly List<Floater> floaters = new();
+        GameObject gate;
+
+        /// <summary>A lower bonus area: its own tile grid, mirrored to the left (sign -1) or right (sign +1).</summary>
+        class SideRoom
+        {
+            public Tile[,] t;
+            public float[,] depth;
+            public int sign, ix0, k0, entrance;    // near edge at |ix| = ix0; entrance at local (0, entrance)
+            public float floorY;
+            public Vector2Int Key(int lx, int lz) => new(sign * (ix0 + lx), k0 + lz);
+        }
+        readonly List<SideRoom> rooms = new();
+
+        public Vector2Int KeyAt(Vector3 world) =>
+            new(Mathf.RoundToInt(world.x / TileSize), Mathf.RoundToInt((world.z - Z0) / TileSize));
+        Vector3 KeyCenter(Vector2Int key, float y) => new(key.x * TileSize, y, Z0 + key.y * TileSize);
+        Vector2Int MainKey(int tx, int tz) => new(tx - Center, RampTiles + tz);
+
+        public Vector3 TileCenter(int tx, int tz) => KeyCenter(MainKey(tx, tz), FloorY);
+
+        public bool InBounds(int x, int z) => x >= 0 && x < W && z >= 0 && z < L;
+        public bool IsFloor(int x, int z) => InBounds(x, z) && Tiles[x, z] == Tile.Floor;
+
+        /// <summary>Tiles worms may crawl on: floor away from the open outer edge and the entry/exit corridors.</summary>
+        public bool IsCrawlable(int x, int z) => IsFloor(x, z) && x > 0 && x < W - 1 && z > 0 && z < L - 1;
+
+        // ------------------------------------------------------------------ creation
+
+        public static MazeChunk Create(int index, int seed, Transform parent)
+        {
+            var go = new GameObject($"Chunk {index}");
+            go.transform.SetParent(parent, false);
+            var chunk = go.AddComponent<MazeChunk>();
+            chunk.Generate(index, seed);
+            return chunk;
+        }
+
+        void Generate(int index, int seed)
+        {
+            Index = index;
+            TileSize = TileSizeOf(index);
+            W = WOf(index);
+            L = LOf(index);
+            RampTiles = RampOf(index);
+            FloorY = FloorYOf(index);
+            Z0 = StartZOf(index);
+            var rng = new System.Random(seed * 7919 + index * 104729);
+            var d = Difficulty.For(index);
+
+            Tiles = GenerateLayout(rng, d, out var depth);
+
+            var mb = new MeshBuilder(TileSize, Z0, FloorY);
+            if (rng.NextDouble() < d.EdgeRoomChance) BuildEdgeRoom(mb, rng, d);
+            AddTiles(mb, Tiles, depth, FloorY, MainKey, 1);
+            bool landingRoom = rng.NextDouble() < d.RampRoomChance;
+            BuildClimbRamp(mb, landingRoom);
+            if (landingRoom) BuildRampRoom(mb, rng, d);
+            FinishMesh(mb);
+
+            SpawnCheckpoint();
+            SpawnPickups(rng, d);
+            foreach (var r in rooms) SpawnRoomRewards(r, rng);
+            SpawnPellets();
+            SpawnWorms(rng, d);
+        }
+
+        // ------------------------------------------------------------------ layout
+
+        Tile[,] GenerateLayout(System.Random rng, Difficulty d, out float[,] depth)
+        {
+            var t = CarveMaze(W, L, new Vector2Int(Center, 1), d.LoopChance, rng);
+
+            // Entry and exit corridors.
+            t[Center, 0] = Tile.Floor;
+            t[Center, L - 1] = Tile.Floor;
+
+            // Open rooms, optionally with pits and a missing outer wall.
+            var pits = new List<Vector2Int>();
+            float areaScale = W * L / (BaseWidth * BaseLength);
+            int roomCount = Mathf.RoundToInt(rng.Next(d.MinRooms, d.MaxRooms + 1) * areaScale);
+            for (int r = 0; r < roomCount; r++)
+            {
+                int rw = rng.Next(3, 6), rl = rng.Next(3, 6);
+                int rx = rng.Next(1, W - rw);
+                if (rng.NextDouble() < 0.45) rx = rng.Next(2) == 0 ? 1 : W - 1 - rw; // hug an edge
+                int rz = rng.Next(2, L - 1 - rl);
+                for (int x = rx; x < rx + rw; x++)
+                for (int z = rz; z < rz + rl; z++)
+                {
+                    bool interior = x > rx && x < rx + rw - 1 && z > rz && z < rz + rl - 1;
+                    if (interior && rng.NextDouble() < d.PitChance) { t[x, z] = Tile.Void; pits.Add(new(x, z)); }
+                    else t[x, z] = Tile.Floor;
+                }
+
+                if (rng.NextDouble() < d.OpenEdgeChance)
+                {
+                    if (rx == 1) for (int z = rz; z < rz + rl; z++) t[0, z] = Tile.Floor;
+                    if (rx + rw == W - 1) for (int z = rz; z < rz + rl; z++) t[W - 1, z] = Tile.Floor;
+                }
+            }
+
+            // Guarantee the exit is reachable; if pits cut the path, fill them in.
+            if (DistanceMap(t, new(Center, 0))[Center, L - 1] < 0)
+                foreach (var p in pits) t[p.x, p.y] = Tile.Floor;
+
+            depth = EdgeDepths(t, rng, 0, W - 1);
+            return t;
+        }
+
+        /// <summary>Perfect maze (recursive backtracker on odd cells) from <paramref name="start"/>, plus some loops.</summary>
+        static Tile[,] CarveMaze(int w, int l, Vector2Int start, float loopChance, System.Random rng)
+        {
+            var t = new Tile[w, l];
+            for (int x = 0; x < w; x++)
+            for (int z = 0; z < l; z++)
+                t[x, z] = Tile.Wall;
+
+            var stack = new Stack<Vector2Int>();
+            t[start.x, start.y] = Tile.Floor;
+            stack.Push(start);
+            var options = new List<Vector2Int>(4);
+            while (stack.Count > 0)
+            {
+                var cur = stack.Peek();
+                options.Clear();
+                foreach (var dir in Dirs)
+                {
+                    var n = cur + dir * 2;
+                    if (n.x >= 1 && n.x <= w - 2 && n.y >= 1 && n.y <= l - 2 && t[n.x, n.y] == Tile.Wall)
+                        options.Add(dir);
+                }
+                if (options.Count == 0) { stack.Pop(); continue; }
+                var pick = options[rng.Next(options.Count)];
+                var mid = cur + pick;
+                var next = cur + pick * 2;
+                t[mid.x, mid.y] = Tile.Floor;
+                t[next.x, next.y] = Tile.Floor;
+                stack.Push(next);
+            }
+
+            // Knock out extra walls so there are loops (more ways to recover from a bad slide).
+            for (int x = 1; x < w - 1; x++)
+            for (int z = 1; z < l - 1; z++)
+            {
+                if (t[x, z] != Tile.Wall || rng.NextDouble() > loopChance) continue;
+                bool horiz = x % 2 == 0 && z % 2 == 1 && t[x - 1, z] == Tile.Floor && t[x + 1, z] == Tile.Floor;
+                bool vert = x % 2 == 1 && z % 2 == 0 && t[x, z - 1] == Tile.Floor && t[x, z + 1] == Tile.Floor;
+                if (horiz || vert) t[x, z] = Tile.Floor;
+            }
+            return t;
+        }
+
+        /// <summary>Column depth under each tile: deep ragged pillars along the given edge columns, like the reference art.</summary>
+        static float[,] EdgeDepths(Tile[,] t, System.Random rng, int edgeA, int edgeB)
+        {
+            int w = t.GetLength(0), l = t.GetLength(1);
+            var depth = new float[w, l];
+            for (int x = 0; x < w; x++)
+            for (int z = 0; z < l; z++)
+                depth[x, z] = x == edgeA || x == edgeB ? 3f + (float)rng.NextDouble() * 7f : 3f;
+            return depth;
+        }
+
+        static readonly Vector2Int[] Dirs = { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+
+        /// <summary>Walking distance (in tiles) from <paramref name="from"/> over floor; -1 where unreachable.</summary>
+        static int[,] DistanceMap(Tile[,] t, Vector2Int from)
+        {
+            int w = t.GetLength(0), l = t.GetLength(1);
+            var dist = new int[w, l];
+            for (int x = 0; x < w; x++)
+            for (int z = 0; z < l; z++)
+                dist[x, z] = -1;
+            var q = new Queue<Vector2Int>();
+            q.Enqueue(from);
+            dist[from.x, from.y] = 0;
+            while (q.Count > 0)
+            {
+                var c = q.Dequeue();
+                foreach (var dir in Dirs)
+                {
+                    var n = c + dir;
+                    if (n.x < 0 || n.x >= w || n.y < 0 || n.y >= l || dist[n.x, n.y] >= 0 || t[n.x, n.y] != Tile.Floor) continue;
+                    dist[n.x, n.y] = dist[c.x, c.y] + 1;
+                    q.Enqueue(n);
+                }
+            }
+            return dist;
+        }
+
+        // ------------------------------------------------------------------ side rooms
+
+        /// <summary>Side room layout: a loopy mini-maze entered at local (0, entrance), with holes and open far edges.</summary>
+        SideRoom MakeRoom(System.Random rng, Difficulty d, int sign, int ix0, int k0, int w, int l, int entrance, float floorY)
+        {
+            var t = CarveMaze(w, l, new Vector2Int(1, entrance), 0.35f, rng);
+            t[0, entrance] = Tile.Floor;
+
+            // Holes, but never ones that cut part of the room off.
+            int reachable = Count(DistanceMap(t, new(0, entrance)));
+            for (int tries = 0; tries < w * l / 6; tries++)
+            {
+                int x = rng.Next(2, w - 1), z = rng.Next(1, l - 1);
+                if (t[x, z] != Tile.Floor || rng.NextDouble() > d.PitChance) continue;
+                t[x, z] = Tile.Void;
+                int now = Count(DistanceMap(t, new(0, entrance)));
+                if (now < reachable - 1) t[x, z] = Tile.Floor;
+                else reachable = now;
+            }
+
+            // Missing far wall here and there: slide too far and you're off the edge.
+            for (int z = 1; z < l - 1; z++)
+                if (t[w - 2, z] == Tile.Floor && rng.NextDouble() < d.OpenEdgeChance * 0.5)
+                    t[w - 1, z] = Tile.Floor;
+
+            var room = new SideRoom { t = t, sign = sign, ix0 = ix0, k0 = k0, entrance = entrance, floorY = floorY };
+            room.depth = EdgeDepths(t, rng, w - 1, -1);
+            rooms.Add(room);
+            return room;
+        }
+
+        static int Count(int[,] dist)
+        {
+            int n = 0;
+            foreach (var v in dist) if (v >= 0) n++;
+            return n;
+        }
+
+        /// <summary>A side room off the main maze's left edge, down a ramp.</summary>
+        void BuildEdgeRoom(MeshBuilder mb, System.Random rng, Difficulty d)
+        {
+            int rampLen = Mathf.Max(3, Mathf.RoundToInt(4f / TileSize));
+            int w = Odd(rng.Next(7, 10) / TileSize), l = Odd(rng.Next(7, 10) / TileSize);
+            int k0 = RampTiles + 2 * rng.Next(0, (L - l) / 2 + 1);   // keep row parity aligned with maze cells
+            int entrance = 1 + 2 * rng.Next(0, (l - 1) / 2);         // odd, 1..l-2
+            int tz = k0 + entrance - RampTiles;                        // main maze row of the opening (odd)
+            Tiles[0, tz] = Tile.Floor;
+
+            float top = FloorY, bottom = FloorY - SideDrop;
+            float xNear = -(Center + 0.5f) * TileSize, xFar = xNear - rampLen * TileSize;
+            AddSideRamp(mb, xFar, xNear, bottom, top, RampTiles + tz, +1f);
+            var room = MakeRoom(rng, d, -1, Center + rampLen + 1, k0, w, l, entrance, bottom);
+            AddTiles(mb, room.t, room.depth, room.floorY, room.Key, -1);
+        }
+
+        /// <summary>A side room off a flat landing halfway up the climbing ramp, to the right.</summary>
+        void BuildRampRoom(MeshBuilder mb, System.Random rng, Difficulty d)
+        {
+            int m = LandingRow;
+            float midY = LandingY;
+            int rampLen = Center + 2;                                  // clears the main maze's right edge
+            int w = Odd(rng.Next(7, 10) / TileSize), l = Odd(rng.Next(7, 10) / TileSize);
+            int maxEntrance = Mathf.Min(m, l - 2);                     // <= m keeps the room inside this section
+            if (maxEntrance % 2 == 0) maxEntrance--;
+            int entrance = 1 + 2 * rng.Next(0, (maxEntrance - 1) / 2 + 1);
+            int k0 = m - entrance;
+
+            float xNear = TileSize * 0.5f, xFar = xNear + rampLen * TileSize;
+            AddSideRamp(mb, xNear, xFar, midY, midY - SideDrop, m, -1f);
+            var room = MakeRoom(rng, d, +1, rampLen + 1, k0, w, l, entrance, midY - SideDrop);
+            AddTiles(mb, room.t, room.depth, room.floorY, room.Key, +1);
+        }
+
+        /// <summary>
+        /// A one-block-wide ramp running along X between <paramref name="x0"/> (height y0) and <paramref name="x1"/> (y1),
+        /// on grid row <paramref name="k"/>, with walls either side and a booster that launches the slock toward the top.
+        /// </summary>
+        void AddSideRamp(MeshBuilder mb, float x0, float x1, float y0, float y1, int k, float upSign)
+        {
+            float z = Z0 + k * TileSize, h = TileSize * 0.5f;
+            float bot = Mathf.Min(y0, y1) - 3f;
+            mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All);
+            mb.PrismX(x0, x1, z - 3 * h, z - h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
+            mb.PrismX(x0, x1, z + h, z + 3 * h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
+
+            // Booster: a trigger over the ramp plus glowing chevrons pointing uphill.
+            var go = new GameObject("Boost Ramp");
+            go.transform.SetParent(transform, false);
+            go.transform.position = new Vector3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f + TileSize, z);
+            var box = go.AddComponent<BoxCollider>();
+            box.isTrigger = true;
+            box.size = new Vector3(Mathf.Abs(x1 - x0) + TileSize, Mathf.Abs(y1 - y0) + TileSize * 2f, TileSize * 0.9f);
+            go.AddComponent<BoostRamp>().up = new Vector3(upSign, 0f, 0f);
+
+            float slope = Mathf.Atan2(y1 - y0, x1 - x0) * Mathf.Rad2Deg;
+            int chevrons = Mathf.Max(2, Mathf.RoundToInt(Mathf.Abs(x1 - x0) / (TileSize * 1.5f)));
+            for (int i = 0; i < chevrons; i++)
+            {
+                float f = (i + 0.5f) / chevrons;
+                var p = new Vector3(Mathf.Lerp(x0, x1, f), Mathf.Lerp(y0, y1, f) + 0.06f * TileSize, z);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    var bar = Decor(PrimitiveType.Cube, go.transform, Vector3.zero, new Vector3(TileSize * 0.12f, 0.04f * TileSize, TileSize * 0.45f), Visuals.Boost);
+                    bar.transform.position = p + new Vector3(0, 0, side * TileSize * 0.17f);
+                    bar.transform.rotation = Quaternion.Euler(0, side * upSign * -35f, slope);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ mesh
+
+        void AddTiles(MeshBuilder mb, Tile[,] t, float[,] depth, float floorY, System.Func<int, int, Vector2Int> key, int xSign)
+        {
+            int w = t.GetLength(0), l = t.GetLength(1);
+            float h = TileSize * 0.5f, wallH = WallHeight;
+            float TopOf(int x, int z) => floorY + (t[x, z] == Tile.Wall ? wallH : 0f);
+            bool Hides(int nx, int nz, float top, float bot)
+            {
+                if (nx < 0 || nx >= w || nz < 0 || nz >= l || t[nx, nz] == Tile.Void) return false;
+                return TopOf(nx, nz) >= top && floorY - depth[nx, nz] <= bot;
+            }
+
+            for (int x = 0; x < w; x++)
+            for (int z = 0; z < l; z++)
+            {
+                if (t[x, z] == Tile.Void) continue;
+                float top = TopOf(x, z), bot = floorY - depth[x, z];
+                var faces = MeshBuilder.Faces.Top;
+                if (!Hides(x + xSign, z, top, bot)) faces |= MeshBuilder.Faces.PosX;
+                if (!Hides(x - xSign, z, top, bot)) faces |= MeshBuilder.Faces.NegX;
+                if (!Hides(x, z + 1, top, bot)) faces |= MeshBuilder.Faces.PosZ;
+                if (!Hides(x, z - 1, top, bot)) faces |= MeshBuilder.Faces.NegZ;
+                var c = KeyCenter(key(x, z), floorY);
+                mb.Prism(c.x - h, c.x + h, c.z - h, c.z + h, bot, top, bot, top, faces,
+                    t[x, z] == Tile.Wall ? MeshBuilder.WallTopSub : MeshBuilder.TopSub);
+            }
+        }
+
+        int LandingRow => RampTiles / 2;
+        float LandingY => (FloorYOf(Index - 1) + FloorY) * 0.5f;
+
+        /// <summary>The one-block corridor climbing from the previous section, optionally with a flat landing + right-hand gap.</summary>
+        void BuildClimbRamp(MeshBuilder mb, bool landing)
+        {
+            float h = TileSize * 0.5f;
+            float prevY = FloorYOf(Index - 1);
+            float zA = Z0 - h, zB = Z0 + (RampTiles - 0.5f) * TileSize;
+            float bot = Mathf.Min(prevY, FloorY) - 3f;
+            var all = MeshBuilder.Faces.All;
+
+            if (!landing)
+            {
+                mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
+                mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
+                mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
+            }
+            else
+            {
+                float midY = LandingY;
+                float zL0 = Z0 + (LandingRow - 0.5f) * TileSize, zL1 = zL0 + TileSize;
+                // floor: slope, flat landing, slope
+                mb.Prism(-h, h, zA, zL0, bot, prevY, bot, midY, all);
+                mb.Prism(-h, h, zL0, zL1, bot, midY, bot, midY, all);
+                mb.Prism(-h, h, zL1, zB, bot, midY, bot, FloorY, all);
+                // left wall: continuous
+                mb.Prism(-3 * h, -h, zA, zL0, bot, prevY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
+                mb.Prism(-3 * h, -h, zL0, zL1, bot, midY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
+                mb.Prism(-3 * h, -h, zL1, zB, bot, midY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
+                // right wall: gap at the landing, where the side ramp leaves
+                mb.Prism(h, 3 * h, zA, zL0, bot, prevY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
+                mb.Prism(h, 3 * h, zL1, zB, bot, midY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
+            }
+
+            if (Index == 0) // back wall so you can't slide off the start
+                mb.Prism(-3 * h, 3 * h, zA - TileSize, zA, bot, WallHeight, bot, WallHeight, all, MeshBuilder.WallTopSub);
+        }
+
+        void FinishMesh(MeshBuilder mb)
+        {
+            var mesh = mb.Build(name);
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = gameObject.AddComponent<MeshRenderer>();
+            mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop };
+            gameObject.AddComponent<MeshCollider>().sharedMesh = mesh;
+        }
+
+        // ------------------------------------------------------------------ contents
+
+        void SpawnCheckpoint()
+        {
+            var c = TileCenter(Center, L - 1);
+            var go = new GameObject("Checkpoint");
+            go.transform.SetParent(transform, false);
+            go.transform.position = c + Vector3.up * 1f;
+            var box = go.AddComponent<BoxCollider>();
+            box.isTrigger = true;
+            box.size = new Vector3(TileSize, 2f, TileSize * 0.4f);
+            go.AddComponent<Checkpoint>().ChunkIndex = Index;
+
+            // Locked gate: a solid glowing block in the exit until every pellet is eaten.
+            gate = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            gate.name = "Gate";
+            gate.transform.SetParent(go.transform, false);
+            gate.transform.localPosition = new Vector3(0, -1f + WallHeight * 0.6f, 0);
+            gate.transform.localScale = new Vector3(TileSize, WallHeight * 1.2f, TileSize);
+            gate.GetComponent<MeshRenderer>().sharedMaterial = Visuals.Gate;
+
+            // Glowing strip on the floor plus a bar across the wall tops.
+            Decor(PrimitiveType.Cube, go.transform, new Vector3(0, -0.98f, 0), new Vector3(TileSize * 0.9f, 0.04f, TileSize * 0.3f), Visuals.Checkpoint);
+            Decor(PrimitiveType.Cube, go.transform, new Vector3(0, WallHeight - 0.4f, 0), new Vector3(TileSize * 3f, 0.12f * TileSize, 0.12f * TileSize), Visuals.Checkpoint);
+        }
+
+        void SpawnPickup(Pickup.Kind kind, Vector2Int key, float floorY)
+        {
+            var go = new GameObject(kind + " Pickup");
+            go.transform.SetParent(transform, false);
+            go.transform.position = KeyCenter(key, floorY) + Vector3.up * 0.6f * TileSize;
+            go.transform.localScale = Vector3.one * TileSize;
+            var col = go.AddComponent<SphereCollider>();
+            col.isTrigger = true;
+            col.radius = 0.45f;
+            go.AddComponent<Pickup>().kind = kind;
+            reserved.Add(key);
+        }
+
+        void SpawnPickups(System.Random rng, Difficulty d)
+        {
+            var deadEnds = new List<Vector2Int>();
+            var others = new List<Vector2Int>();
+            for (int x = 1; x < W - 1; x++)
+            for (int z = 2; z < L - 2; z++)
+            {
+                if (!IsFloor(x, z)) continue;
+                int n = (IsFloor(x + 1, z) ? 1 : 0) + (IsFloor(x - 1, z) ? 1 : 0) + (IsFloor(x, z + 1) ? 1 : 0) + (IsFloor(x, z - 1) ? 1 : 0);
+                (n == 1 ? deadEnds : others).Add(new(x, z));
+            }
+            Shuffle(deadEnds, rng);
+            Shuffle(others, rng);
+            deadEnds.AddRange(others);
+
+            for (int i = 0; i < Mathf.Min(d.Pickups, deadEnds.Count); i++)
+                SpawnPickup(Pickup.Kind.Power, MainKey(deadEnds[i].x, deadEnds[i].y), FloorY);
+        }
+
+        /// <summary>Deepest spot: a big clock or (rarer) the gate key. Another far spot: a power gem.</summary>
+        void SpawnRoomRewards(SideRoom r, System.Random rng)
+        {
+            var dist = DistanceMap(r.t, new Vector2Int(0, r.entrance));
+            var spots = new List<Vector2Int>();
+            for (int x = 0; x < r.t.GetLength(0); x++)
+            for (int z = 0; z < r.t.GetLength(1); z++)
+                if (dist[x, z] > 1) spots.Add(new(x, z));
+            if (spots.Count < 2) return;
+            spots.Sort((a, b) => dist[b.x, b.y].CompareTo(dist[a.x, a.y]));
+
+            var special = rng.NextDouble() < 0.35 ? Pickup.Kind.Key : Pickup.Kind.Clock;
+            SpawnPickup(special, r.Key(spots[0].x, spots[0].y), r.floorY);
+            var gem = spots[Mathf.Min(spots.Count - 1, spots.Count / 3)];
+            SpawnPickup(Pickup.Kind.Power, r.Key(gem.x, gem.y), r.floorY);
+        }
+
+        void SpawnPellets()
+        {
+            var root = new GameObject("Pellets").transform;
+            root.SetParent(transform, false);
+
+            var reach = DistanceMap(Tiles, new Vector2Int(Center, 0));
+            for (int x = 0; x < W; x++)
+            for (int z = 0; z < L - 1; z++) // not the exit tile: that's where the gate sits
+                if (reach[x, z] >= 0) AddPellet(root, MainKey(x, z), FloorY, false);
+
+            foreach (var r in rooms)
+            {
+                var d = DistanceMap(r.t, new Vector2Int(0, r.entrance));
+                for (int x = 0; x < r.t.GetLength(0); x++)
+                for (int z = 0; z < r.t.GetLength(1); z++)
+                    if (d[x, z] >= 0) AddPellet(root, r.Key(x, z), r.floorY, true);
+            }
+            if (PelletsLeft == 0) OpenGate();
+        }
+
+        void AddPellet(Transform root, Vector2Int key, float floorY, bool gold)
+        {
+            if (reserved.Contains(key) || pellets.ContainsKey(key)) return;
+            float size = (gold ? 0.24f : 0.2f) * TileSize;
+            var p = Decor(PrimitiveType.Cube, root, Vector3.zero, Vector3.one * size, gold ? Visuals.GoldPellet : Visuals.Pellet);
+            p.transform.position = KeyCenter(key, floorY) + Vector3.up * 0.3f * TileSize;
+            p.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            pellets[key] = new Pellet { go = p, gold = gold };
+            floaters.Add(new Floater
+            {
+                t = p.transform,
+                home = p.transform.position,
+                phase = Random.value * 100f,
+                spin = Random.Range(40f, 140f) * (Random.value < 0.5f ? -1f : 1f),
+                bob = Random.Range(1.2f, 2.4f),
+            });
+        }
+
+        // Pellet cubes: sit flat, spin at their own speed and direction, and bob up and down out of step.
+        void Update()
+        {
+            float time = Time.time, amp = 0.06f * TileSize;
+            for (int i = floaters.Count - 1; i >= 0; i--)
+            {
+                var f = floaters[i];
+                if (f.t == null) { floaters.RemoveAt(i); continue; } // eaten
+                float ph = f.phase + time;
+                f.t.SetPositionAndRotation(
+                    f.home + Vector3.up * Mathf.Sin(ph * f.bob) * amp,
+                    Quaternion.Euler(Mathf.Sin(ph * 0.7f) * 8f, ph * f.spin, Mathf.Cos(ph * 0.9f) * 8f));
+            }
+        }
+
+        /// <summary>Eat the pellet on the block under <paramref name="world"/>, if any (main maze or side room).</summary>
+        public bool TryEatPellet(Vector3 world, out bool gold)
+        {
+            gold = false;
+            var key = KeyAt(world);
+            if (!pellets.TryGetValue(key, out var p)) return false;
+            // Only eat what we're actually level with (not a pellet on a floor far above/below us).
+            if (Mathf.Abs(p.go.transform.position.y - world.y) > TileSize * 1.5f) return false;
+            gold = p.gold;
+            Destroy(p.go);
+            pellets.Remove(key);
+            return true;
+        }
+
+        public void OpenGate()
+        {
+            if (gate != null) Destroy(gate);
+            gate = null;
+        }
+
+        void SpawnWorms(System.Random rng, Difficulty d)
+        {
+            var cells = new List<Vector2Int>();
+            for (int x = 1; x < W - 1; x++)
+            for (int z = 5; z < L - 2; z++)
+                if (IsCrawlable(x, z)) cells.Add(new(x, z));
+            Shuffle(cells, rng);
+
+            for (int i = 0; i < Mathf.Min(d.Worms, cells.Count); i++)
+            {
+                var go = new GameObject("Worm");
+                go.transform.SetParent(transform, false);
+                go.AddComponent<Worm>().Init(this, cells[i], d.WormSpeed, rng.Next());
+            }
+        }
+
+        public static GameObject Decor(PrimitiveType type, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            DestroyImmediate(go.GetComponent<Collider>());
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localScale = scale;
+            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            return go;
+        }
+
+        static void Shuffle<T>(List<T> list, System.Random rng)
+        {
+            for (int i = list.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (list[i], list[j]) = (list[j], list[i]);
+            }
+        }
+
+        void OnDestroy()
+        {
+            var mf = GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null) Destroy(mf.sharedMesh);
+        }
+    }
+
+    /// <summary>How nasty chunk N is. Everything ramps up and then plateaus.</summary>
+    public struct Difficulty
+    {
+        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance, RampRoomChance;
+        public int MinRooms, MaxRooms, Pickups, Worms;
+
+        public static Difficulty For(int i) => new()
+        {
+            LoopChance = Mathf.Max(0.02f, 0.10f - i * 0.008f),
+            PitChance = Mathf.Min(0.5f, 0.15f + i * 0.03f),
+            OpenEdgeChance = Mathf.Min(0.95f, 0.4f + i * 0.06f),
+            MinRooms = 1,
+            MaxRooms = 3,
+            Pickups = 3 + Mathf.Min(3, i / 3),
+            Worms = Mathf.Min(6, 1 + (i + 1) / 2),
+            WormSpeed = Mathf.Min(5f, 2.2f + i * 0.15f),
+            TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
+            EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
+            RampRoomChance = i == 0 ? 0f : 0.45f,
+        };
+    }
+}
