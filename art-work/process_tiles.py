@@ -3,9 +3,9 @@ Turn the TextureMap.app PBR sets in this folder into Unity-ready tile textures.
 
     python3 art-work/process_tiles.py        (run from the project folder)
 
-Works at any image size (e.g. 128x128 or 1254x1254). For each set (floor, tops, walls) it crops every map to
-the panel's frame lines, so the pattern tiles with its lines on block edges, keeps roughly the source
-resolution (rounded up to a power of two, which Unity prefers) and writes to Assets/Textures/Tiles/:
+Works at any image size (e.g. 128x128 or 1254x1254). Each image is one whole block face: floor = one floor
+block, tops = the top of a wall block, walls = one side of a wall block. It keeps the source resolution
+(rounded up to a power of two, which Unity prefers) and writes to Assets/Textures/Tiles/:
     <set>_base.png         colour, from the set's own image (e.g. slock-floor.png); falls back to the grey AO map
     <set>_normal.png       normal map (OpenGL +Y, which is what Unity expects)
     <set>_metalsmooth.png  URP Lit "metallic" map: R = metallic, A = smoothness (1 - roughness)
@@ -13,8 +13,7 @@ resolution (rounded up to a power of two, which Unity prefers) and writes to Ass
 Unity picks the new files up automatically when its window is focused (the materials already point at them).
 If the materials are missing, use the Unity menu: Slock > Create Tile Materials.
 
-If you re-draw a set with a different layout, adjust its crop below: (left, top, right, bottom) as fractions of
-the image size, at the centre of the panel's outer frame lines.
+To use only part of an image, change its crop below: (left, top, right, bottom) as fractions of the image size.
 """
 import glob
 import os
@@ -22,10 +21,11 @@ import os
 import numpy as np
 from PIL import Image
 
+# Each image is one whole block face, so by default nothing is trimmed: (left, top, right, bottom) fractions.
 CROPS = {
-    "floor": (0.1236, 0.1148, 0.8748, 0.8652),
-    "tops": (0.0774, 0.0797, 0.9211, 0.9027),
-    "walls": (0.1284, 0.0941, 0.8692, 0.8995),
+    "floor": (0.0, 0.0, 1.0, 1.0),   # one floor block
+    "tops": (0.0, 0.0, 1.0, 1.0),    # the top of one wall block
+    "walls": (0.0, 0.0, 1.0, 1.0),   # one side face of a wall block
 }
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "Assets", "Textures", "Tiles")

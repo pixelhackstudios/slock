@@ -17,7 +17,7 @@ namespace Slock
         readonly List<Vector2> uvs = new();
         readonly List<int>[] tris = { new(), new(), new() };
         readonly float uvScale, zOrigin, yOrigin;
-        const float BlocksPerTexture = 2f; // each tile texture spans 2x2 blocks, so its panel lines fall on block edges
+        const float BlocksPerTexture = 1f; // each tile image is one whole block face (floor, wall top, wall side)
 
         /// <param name="zOrigin">World Z of a block centre (grids start at different Z per section).</param>
         /// <param name="yOrigin">World Y of the floor, so wall-side panels line up with it.</param>
