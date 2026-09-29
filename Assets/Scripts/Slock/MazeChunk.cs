@@ -10,6 +10,9 @@ namespace Slock
     /// chunk's height, then a W x L tile maze with rooms, pits, open edges, pellets, gems and worms.
     /// Chunks are laid end to end along +Z, each one <see cref="Rise"/> higher than the last.
     ///
+    /// At the centre sits a slorm pen (Pac-Man style): a small wall ring with one opening. Slorms start
+    /// inside it and crawl out; it holds no pellets or pickups.
+    ///
     /// "Resolution" climbs as you go: every gate shrinks the block size by <see cref="BlockStep"/> (60 -> 58 -> 56 ...),
     /// while a section keeps roughly the same footprint, so each section has more, smaller cells than the last.
     ///
@@ -26,7 +29,7 @@ namespace Slock
     public class MazeChunk : MonoBehaviour
     {
         public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
-        const float BaseWidth = 15f, BaseLength = 21f, RampLength = 6f;
+        const float BaseWidth = 19f, BaseLength = 25f, RampLength = 6f;
         public const float Rise = 1.0f;
         const float SideDrop = 1.5f;       // how far below its entrance a side room sits
 
@@ -84,6 +87,9 @@ namespace Slock
         class Pellet { public GameObject go; public bool gold; }
         readonly Dictionary<Vector2Int, Pellet> pellets = new();
         readonly HashSet<Vector2Int> reserved = new();     // keys holding a pickup: no pellet there
+        readonly HashSet<Vector2Int> penCells = new();     // slorm-pen floor (maze-local): no pellets or pickups
+        readonly List<Vector2Int> penHomes = new();        // slorm starting blocks inside the pen (maze-local)
+        int penX0, penZ0, penX1, penZ1;                    // pen bounds (maze-local, inclusive)
         struct Floater { public Transform t; public Vector3 home; public float phase, spin, bob; }
         readonly List<Floater> floaters = new();
         GameObject gate;
@@ -185,12 +191,59 @@ namespace Slock
                 }
             }
 
+            // Slorm pen at the centre (Pac-Man style): walls with one opening, slorms start inside.
+            CarveSlormPen(t);
+
             // Guarantee the exit is reachable; if pits cut the path, fill them in.
             if (DistanceMap(t, new(Center, 0))[Center, L - 1] < 0)
                 foreach (var p in pits) t[p.x, p.y] = Tile.Floor;
+            // If the pen itself cut the only path, open it up rather than trap the player.
+            if (DistanceMap(t, new(Center, 0))[Center, L - 1] < 0)
+                ClearSlormPen(t);
 
             depth = EdgeDepths(t, rng, 0, W - 1);
             return t;
+        }
+
+        /// <summary>Centre pen the slorms start in: a 5x4 wall ring (maze-local) with one opening toward the exit,
+        /// an approach block in front of it, and a 3x2 floor inside. Registers <see cref="penCells"/> (no pellets
+        /// or pickups there) and <see cref="penHomes"/> (slorm starting blocks).</summary>
+        void CarveSlormPen(Tile[,] t)
+        {
+            penCells.Clear();
+            penHomes.Clear();
+            int cx = Center;
+            int cz = L / 2;
+            if (cz % 2 == 0) cz++; // sit on a maze-cell row
+            int x0 = cx - 2, x1 = cx + 2, z0 = cz - 1, z1 = cz + 2;
+            if (x0 < 1 || x1 > W - 2 || z0 < 2 || z1 + 1 > L - 2) return; // too small: skip the pen
+            penX0 = x0; penZ0 = z0; penX1 = x1; penZ1 = z1 + 1;
+            for (int x = x0; x <= x1; x++)
+            for (int z = z0; z <= z1; z++)
+            {
+                bool edge = x == x0 || x == x1 || z == z0 || z == z1;
+                bool opening = x == cx && z == z1;
+                t[x, z] = edge && !opening ? Tile.Wall : Tile.Floor;
+            }
+            t[cx, z1 + 1] = Tile.Floor; // approach in front of the opening
+            for (int x = x0 + 1; x <= x1 - 1; x++)
+            for (int z = z0 + 1; z <= z1 - 1; z++)
+            {
+                penCells.Add(new(x, z));
+                penHomes.Add(new(x, z));
+            }
+            penCells.Add(new(cx, z1));
+            penCells.Add(new(cx, z1 + 1));
+        }
+
+        /// <summary>Fallback when the pen blocks the only entry-to-exit path: flatten it to open floor.</summary>
+        void ClearSlormPen(Tile[,] t)
+        {
+            for (int x = penX0; x <= penX1; x++)
+            for (int z = penZ0; z <= penZ1; z++)
+                t[x, z] = Tile.Floor;
+            penCells.Clear();
+            penHomes.Clear();
         }
 
         /// <summary>Perfect maze (recursive backtracker on odd cells) from <paramref name="start"/>, plus some loops.</summary>
@@ -497,6 +550,7 @@ namespace Slock
             for (int z = 2; z < L - 2; z++)
             {
                 if (!IsFloor(x, z)) continue;
+                if (penCells.Contains(new(x, z))) continue; // slorm pen: no pickups inside
                 int n = (IsFloor(x + 1, z) ? 1 : 0) + (IsFloor(x - 1, z) ? 1 : 0) + (IsFloor(x, z + 1) ? 1 : 0) + (IsFloor(x, z - 1) ? 1 : 0);
                 (n == 1 ? deadEnds : others).Add(new(x, z));
             }
@@ -533,7 +587,7 @@ namespace Slock
             var reach = DistanceMap(Tiles, new Vector2Int(Center, 0));
             for (int x = 0; x < W; x++)
             for (int z = 0; z < L - 1; z++) // not the exit tile: that's where the gate sits
-                if (reach[x, z] >= 0) AddPellet(root, MainKey(x, z), FloorY, false);
+                if (reach[x, z] >= 0 && !penCells.Contains(new(x, z))) AddPellet(root, MainKey(x, z), FloorY, false);
 
             foreach (var r in rooms)
             {
@@ -600,17 +654,27 @@ namespace Slock
 
         void SpawnWorms(System.Random rng, Difficulty d)
         {
+            // Slorms start in the centre pen (Pac-Man style) and crawl out through its opening.
+            var homes = new List<Vector2Int>();
+            foreach (var c in penHomes)
+                if (IsCrawlable(c.x, c.y)) homes.Add(c);
+            Shuffle(homes, rng);
+
             var cells = new List<Vector2Int>();
             for (int x = 1; x < W - 1; x++)
             for (int z = 5; z < L - 2; z++)
                 if (IsCrawlable(x, z)) cells.Add(new(x, z));
             Shuffle(cells, rng);
 
-            for (int i = 0; i < Mathf.Min(d.Worms, cells.Count); i++)
+            for (int i = 0; i < d.Worms; i++)
             {
+                Vector2Int cell;
+                if (homes.Count > 0) cell = homes[i % homes.Count];
+                else if (i < cells.Count) cell = cells[i];
+                else break;
                 var go = new GameObject("Worm");
                 go.transform.SetParent(transform, false);
-                go.AddComponent<Worm>().Init(this, cells[i], d.WormSpeed, rng.Next());
+                go.AddComponent<Worm>().Init(this, cell, d.WormSpeed, rng.Next());
             }
         }
 
