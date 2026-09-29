@@ -12,7 +12,7 @@ namespace Slock
         const bool DefTrackball = true;
         const bool DefF16Response = false;
         const float DefSensitivity = 1f, DefCurve = 1.6f, DefRecenter = 0f, DefSmoothing = 0.06f, DefMaxTilt = 24f,
-                    DefFallGravity = 45f, DefSlideDrag = 1.8f, DefMaxSpeed = 16f, DefLaneSpring = 70f;
+                    DefFallGravity = 45f, DefFriction = 0.05f, DefSpeedLimit = 40f;
 
         /// <summary>Trackball: the (hidden) mouse nudges the tilt and it stays put. Otherwise the cursor's distance
         /// from screen centre sets the tilt.</summary>
@@ -24,9 +24,8 @@ namespace Slock
         public static float TiltSmoothing = DefSmoothing;   // seconds for the board to follow the input
         public static float MaxTilt = DefMaxTilt;           // degrees of actual world/camera tilt at full input
         public static float FallGravity = DefFallGravity;   // magnitude of the tilted world gravity vector
-        public static float SlideDrag = DefSlideDrag;       // how quickly it settles; tilt speed = push / drag
-        public static float MaxSpeed = DefMaxSpeed;
-        public static float LaneSpring = DefLaneSpring;     // how firmly it's held on its grid line
+        public static float Friction = DefFriction;         // surface friction coefficient (0 = ice); the only thing that slows it
+        public static float MaxSpeed = DefSpeedLimit;       // safety limit only, well above what gravity reaches
 
         const string Key = "slock.controls.";
 
@@ -41,9 +40,8 @@ namespace Slock
             MaxTilt = PlayerPrefs.GetFloat(Key + "maxTilt", DefMaxTilt);
             float oldGravity = PlayerPrefs.GetFloat(Key + "gravity", DefFallGravity);
             FallGravity = PlayerPrefs.GetFloat(Key + "fallGravity", oldGravity);
-            SlideDrag = PlayerPrefs.GetFloat(Key + "slideDrag", DefSlideDrag);
-            MaxSpeed = PlayerPrefs.GetFloat(Key + "maxSpeed", DefMaxSpeed);
-            LaneSpring = PlayerPrefs.GetFloat(Key + "laneSpring", DefLaneSpring);
+            Friction = PlayerPrefs.GetFloat(Key + "friction", DefFriction);
+            MaxSpeed = PlayerPrefs.GetFloat(Key + "speedLimit", DefSpeedLimit);
         }
 
         public static void Save()
@@ -56,9 +54,8 @@ namespace Slock
             PlayerPrefs.SetFloat(Key + "smoothing", TiltSmoothing);
             PlayerPrefs.SetFloat(Key + "maxTilt", MaxTilt);
             PlayerPrefs.SetFloat(Key + "fallGravity", FallGravity);
-            PlayerPrefs.SetFloat(Key + "slideDrag", SlideDrag);
-            PlayerPrefs.SetFloat(Key + "maxSpeed", MaxSpeed);
-            PlayerPrefs.SetFloat(Key + "laneSpring", LaneSpring);
+            PlayerPrefs.SetFloat(Key + "friction", Friction);
+            PlayerPrefs.SetFloat(Key + "speedLimit", MaxSpeed);
             PlayerPrefs.Save();
         }
 
@@ -72,9 +69,8 @@ namespace Slock
             TiltSmoothing = DefSmoothing;
             MaxTilt = DefMaxTilt;
             FallGravity = DefFallGravity;
-            SlideDrag = DefSlideDrag;
-            MaxSpeed = DefMaxSpeed;
-            LaneSpring = DefLaneSpring;
+            Friction = DefFriction;
+            MaxSpeed = DefSpeedLimit;
             Save();
         }
     }

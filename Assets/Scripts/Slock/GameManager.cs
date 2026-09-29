@@ -579,9 +579,8 @@ namespace Slock
             changed |= Slider(ref y, x, w, "Tilt response time", ref ControlSettings.TiltSmoothing, 0f, 0.3f, "lower = board follows the mouse instantly");
             changed |= Slider(ref y, x, w, "World tilt (degrees)", ref ControlSettings.MaxTilt, 8f, 35f, "visible tilt and physical downhill use this same angle");
             changed |= Slider(ref y, x, w, "Gravity strength", ref ControlSettings.FallGravity, 5f, 80f, "magnitude of the tilted world gravity vector");
-            changed |= Slider(ref y, x, w, "Braking", ref ControlSettings.SlideDrag, 0.3f, 5f, "higher = stops sooner & slower top speed");
-            changed |= Slider(ref y, x, w, "Top speed", ref ControlSettings.MaxSpeed, 5f, 25f, "hard speed limit");
-            changed |= Slider(ref y, x, w, "Grid lock", ref ControlSettings.LaneSpring, 20f, 150f, "how firmly it's held on its row");
+            changed |= Slider(ref y, x, w, "Surface friction", ref ControlSettings.Friction, 0f, 0.6f, "0 = ice; it only slides once the tilt's slope exceeds this");
+            changed |= Slider(ref y, x, w, "Speed limit", ref ControlSettings.MaxSpeed, 10f, 60f, "safety cap only");
 
             if (changed) ControlSettings.Save();
 

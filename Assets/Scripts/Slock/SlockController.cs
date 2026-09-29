@@ -3,8 +3,8 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// The sliding block. The world's tilted gravity does the pushing; this keeps it locked
-    /// to the grid: it always travels along a row or column, corners Pac-Man style, and drops cleanly into holes.
+    /// The sliding block. The world's tilted gravity does all the pushing and surface friction is the only resistance;
+    /// this just keeps it flush on ramps and drops it cleanly into holes.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class SlockController : MonoBehaviour
@@ -13,6 +13,10 @@ namespace Slock
         public float Size { get; private set; } = 1f;
         public float Height => Size * 1.1f;      // a hair taller than the walls (which are Size tall)
         const float Clearance = 0.04f;           // physics box is a hair smaller (fraction of Size) so it never jams
+        // Compensation for this collider's flat-face contact patch: measured (SlockResponseProbe), a sliding box here is
+        // slowed by exactly twice the material's friction coefficient (PhysX friction patches use multiple contact points).
+        // The material gets half of ControlSettings.Friction so that value is the real mu. Re-measure if the collider shape changes.
+        const float PhysxPatchFrictionCompensation = 0.5f;
         public float shrinkSpeed = 3f;           // size units per second when passing through a gate
 
         float targetSize = 1f;
@@ -20,19 +24,10 @@ namespace Slock
         BoxCollider box;
         Transform visual;
 
-        public float laneSpring = 70f;     // how hard the block is held on its grid line
-        public float laneDamping = 12f;
         public float holeSnap = 14f;       // how fast it lines up with a hole it's dropping into
-        public float turnBias = 1.15f;     // tilt must favour a new axis by this much before switching (no jitter on diagonals)
-
-        bool wantZ = true;
-        public float maxSpeed = 16f;
-        /// <summary>Sliding drag. Tilt sets the speed it settles at (tilt accel / drag): higher = tighter, slower top speed.</summary>
-        public float slideDrag = 1.8f;
         public float alignSpeed = 12f;
 
         public Rigidbody Body { get; private set; }
-        public bool OnRail { get; private set; }
         public bool Grounded { get; private set; }
 
         const int SelfLayer = 2; // "Ignore Raycast", so our own probes skip us
@@ -41,12 +36,12 @@ namespace Slock
         {
             var go = new GameObject("Slock") { layer = SelfLayer };
             var box = go.AddComponent<BoxCollider>();
-            box.material = new PhysicsMaterial("Slock Ice")
+            box.material = new PhysicsMaterial("Slock")
             {
-                dynamicFriction = 0f,
-                staticFriction = 0f,
+                dynamicFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
+                staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
                 bounciness = 0.2f,
-                frictionCombine = PhysicsMaterialCombine.Minimum,
+                frictionCombine = PhysicsMaterialCombine.Minimum, // the slock's friction wins over the default 0.6 surfaces
                 bounceCombine = PhysicsMaterialCombine.Maximum,
             };
 
@@ -104,7 +99,7 @@ namespace Slock
         {
             Body = GetComponent<Rigidbody>();
             Body.mass = 1f;
-            Body.linearDamping = 0.05f; // sliding drag is applied horizontally in FixedUpdate so falls aren't slowed
+            Body.linearDamping = 0f;    // no hidden drag: surface friction is the only resistance
             Body.angularDamping = 5f;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
             Body.interpolation = RigidbodyInterpolation.Interpolate;
@@ -131,16 +126,10 @@ namespace Slock
             if (!Mathf.Approximately(Size, targetSize))
                 ApplySize(Mathf.MoveTowards(Size, targetSize, shrinkSpeed * Time.fixedDeltaTime));
 
-            // Feel settings are live-tunable from the pause screen.
-            slideDrag = ControlSettings.SlideDrag;
-            maxSpeed = ControlSettings.MaxSpeed;
-            laneSpring = ControlSettings.LaneSpring;
-            laneDamping = 1.6f * Mathf.Sqrt(laneSpring);   // firm but not bouncy
+            // Live-tunable from the pause screen. Friction is the only resistance: gravity does all the pushing.
+            box.sharedMaterial.dynamicFriction = box.sharedMaterial.staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation;
             var p = Body.position;
-            float ts = gridTs;
-
             var v = Body.linearVelocity;
-            var g = Physics.gravity;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
 
             Grounded = Physics.Raycast(p, Vector3.down, out var hit, Height * 0.5f + 0.35f * Size, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
@@ -148,58 +137,26 @@ namespace Slock
             {
                 // Centre is over a hole (or past an edge): line up with that grid square and drop straight
                 // through it, instead of catching a corner and wedging.
-                var target = new Vector3(Snap(p.x, ts), p.y, SnapZ(p.z));
+                var target = new Vector3(Snap(p.x, gridTs), p.y, SnapZ(p.z));
                 var pull = (target - p) * holeSnap;
                 Body.linearVelocity = new Vector3(pull.x, v.y, pull.z);
-                OnRail = true;
                 return;
             }
-
-            // Speed follows tilt: drag balances the tilt's pull, so a small tilt creeps and a full tilt races,
-            // and levelling the board brings the block to a stop in about half a second.
-            Body.AddForce(new Vector3(-v.x, 0f, -v.z) * slideDrag, ForceMode.Acceleration);
 
             // Stay flush with ramps.
             var targetRot = Quaternion.FromToRotation(Vector3.up, hit.normal);
             Body.MoveRotation(Quaternion.Slerp(Body.rotation, targetRot, alignSpeed * Time.fixedDeltaTime));
 
-            // Grid lock: the block always travels along a row or column, like Pac-Man. Tilting toward a wall
-            // while sliding keeps it sliding along its row, and it turns into the first opening that way.
-            float gx = Mathf.Abs(g.x), gz = Mathf.Abs(g.z);
-            if (gz > gx * turnBias) wantZ = true;
-            else if (gx > gz * turnBias) wantZ = false;
-            bool tilted = Mathf.Max(gx, gz) > 0.8f;
-            bool movingZ = Mathf.Abs(v.z) >= Mathf.Abs(v.x);
-            bool sliding = new Vector2(v.x, v.z).magnitude > 0.3f;
-
-            bool travelZ;
-            if (!tilted) travelZ = sliding ? movingZ : wantZ;
-            else
-            {
-                var want = wantZ ? new Vector3(0, 0, Mathf.Sign(g.z)) : new Vector3(Mathf.Sign(g.x), 0, 0);
-                bool blocked = Probe(p, want, ts * 0.7f);
-                travelZ = blocked && sliding && movingZ != wantZ ? movingZ : wantZ;
-            }
-
-            // Hold the other axis on the grid line, cancelling gravity's sideways pull so it sits exactly on it.
-            var lockAxis = travelZ ? Vector3.right : Vector3.forward;
-            float c = Vector3.Dot(p, lockAxis);
-            float d = (travelZ ? Snap(c, ts) : SnapZ(c)) - c;
-            Body.AddForce(lockAxis * (d * laneSpring - Vector3.Dot(v, lockAxis) * laneDamping - Vector3.Dot(g, lockAxis)), ForceMode.Acceleration);
-            OnRail = true;
-
+            // Safety limit only (keeps fast falls from tunnelling); not part of the feel.
             var flat = new Vector3(v.x, 0, v.z);
-            if (flat.magnitude > maxSpeed)
+            if (flat.magnitude > ControlSettings.MaxSpeed)
             {
-                flat = flat.normalized * maxSpeed;
+                flat = flat.normalized * ControlSettings.MaxSpeed;
                 Body.linearVelocity = new Vector3(flat.x, v.y, flat.z);
             }
         }
 
         static float Snap(float v, float ts) => Mathf.Round(v / ts) * ts;
         float SnapZ(float z) => gridZ0 + Mathf.Round((z - gridZ0) / gridTs) * gridTs;
-
-        static bool Probe(Vector3 from, Vector3 dir, float dist) =>
-            Physics.Raycast(from, dir, dist, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
     }
 }
