@@ -26,6 +26,12 @@ For other platforms, use **File → Build Profiles**, pick your platform and cli
 
 To just play it in the editor, open `Assets/Scenes/SampleScene` and press **▶ Play**.
 
+## Contributing
+
+1. **Fork** this repo on GitHub, then clone your fork.
+2. Make your changes on a new branch and push them to your fork.
+3. Open a **pull request** here describing what you changed and why.
+
 ## Licence
 
 Code: [MIT](LICENSE). Art: [CC BY 4.0](LICENSE-ART.md). Please credit Pixelhack Studios (Scott O'Nanski) — https://www.pixelhackstudios.com
