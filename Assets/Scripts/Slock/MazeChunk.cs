@@ -32,7 +32,14 @@ namespace Slock
         /// <summary>World size of one grid block (and of the slock) in section <paramref name="index"/>.</summary>
         public static float TileSizeOf(int index) => BlockOf(index) / (float)BaseBlock;
         static int Odd(float v) { int n = Mathf.RoundToInt(v); return n % 2 == 0 ? n + 1 : n; }
-        static int WOf(int i) => Odd(BaseWidth / TileSizeOf(i));
+        // Maze cells sit on odd columns counted from the centre, so the centre column index must itself be odd
+        // (width 15, 19, 23 ...). Otherwise every other column is off by one and an extra, hidden wall column
+        // lines the maze's inside edges, blocking the side-room openings.
+        static int WOf(int i)
+        {
+            int w = Odd(BaseWidth / TileSizeOf(i));
+            return (w / 2) % 2 == 1 ? w : w + 2;
+        }
         static int LOf(int i) => Odd(BaseLength / TileSizeOf(i));
         static int RampOf(int i) => Mathf.Max(4, Mathf.RoundToInt(RampLength / TileSizeOf(i)));
         static float LengthOf(int i) => (RampOf(i) + LOf(i)) * TileSizeOf(i);
