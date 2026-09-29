@@ -4,8 +4,9 @@ using UnityEngine.InputSystem;
 namespace Slock
 {
     /// <summary>
-    /// "Tilting the world": mouse input picks a tilt, which steers the grounded slock while gravity stays vertical.
-    /// The camera is rolled by the same rotation so on screen it looks like the maze tilts. Two input modes (ControlSettings):
+    /// "Tilting the world": mouse input picks a tilt. A single tilted gravity vector drives the physics and the
+    /// camera presents that exact same rotation, so apparent downhill and simulated downhill cannot diverge.
+    /// Two input modes (ControlSettings):
     /// trackball (mouse movement nudges a virtual stick that stays put) or absolute (cursor offset from centre).
     /// </summary>
     public class TiltCameraRig : MonoBehaviour
@@ -25,7 +26,6 @@ namespace Slock
 
         public Transform target;
         public bool inputEnabled;
-        public Vector3 TiltAcceleration { get; private set; }
         /// <summary>When set, used instead of mouse/gamepad (automated playtests, demo mode).</summary>
         [System.NonSerialized] public Vector2? overrideTilt;
 
@@ -74,9 +74,8 @@ namespace Slock
         {
             var want = overrideTilt ?? (inputEnabled ? ReadInput() : Vector2.zero);
             Tilt = Vector2.SmoothDamp(Tilt, want, ref tiltVel, Mathf.Max(0.001f, ControlSettings.TiltSmoothing), Mathf.Infinity, Time.unscaledDeltaTime);
-            var direction = GravityDir();
-            Physics.gravity = Vector3.down * ControlSettings.FallGravity;
-            TiltAcceleration = new Vector3(direction.x, 0f, direction.z) * ControlSettings.TiltAcceleration;
+            // One world, one downhill direction: the force field and visible tilt are the same rotation.
+            Physics.gravity = GravityDir() * ControlSettings.FallGravity;
         }
 
         Vector2 ReadInput()
@@ -217,18 +216,14 @@ namespace Slock
             var goal = target.position + Vector3.forward * lookAhead;
             pivot = Vector3.SmoothDamp(pivot, goal, ref pivotVel, followSmoothing, Mathf.Infinity, Time.unscaledDeltaTime);
 
-            // Rotate the camera the way the world "would" have been rotated, scaled down for comfort.
+            // Present exactly the same tilt that physics is using. Scaling this independently makes
+            // the player see one downhill direction while the Rigidbody experiences another.
             var worldTilt = Quaternion.FromToRotation(Vector3.down, GravityDir());
-            var roll = Quaternion.Slerp(Quaternion.identity, worldTilt, ControlSettings.VisualTilt);
-            var rot = roll * BaseRot;
+            var rot = worldTilt * BaseRot;
             zoomNow = Mathf.Lerp(zoomNow, zoom, 1f - Mathf.Exp(-2f * Time.unscaledDeltaTime));
             transform.SetPositionAndRotation(pivot + rot * new Vector3(0, 0, -distance * zoomNow), rot);
         }
 
-        void OnDisable()
-        {
-            TiltAcceleration = Vector3.zero;
-            Physics.gravity = new Vector3(0, -9.81f, 0);
-        }
+        void OnDisable() => Physics.gravity = new Vector3(0, -9.81f, 0);
     }
 }

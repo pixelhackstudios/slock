@@ -52,17 +52,8 @@ namespace Slock
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
-            if (FindAnyObjectByType<GameManager>() != null || FindAnyObjectByType<SlockPhysicsTruthTest>() != null)
-                return;
-
-            bool runTruthTest = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-slocktruth") >= 0;
-#if UNITY_EDITOR
-            runTruthTest |= UnityEditor.SessionState.GetBool(SlockPhysicsTruthTest.EditorSessionKey, false);
-            UnityEditor.SessionState.EraseBool(SlockPhysicsTruthTest.EditorSessionKey);
-#endif
-            var game = new GameObject(runTruthTest ? "Slock Physics Truth Test" : "Slock Game");
-            if (runTruthTest) game.AddComponent<SlockPhysicsTruthTest>();
-            else game.AddComponent<GameManager>();
+            if (FindAnyObjectByType<GameManager>() == null)
+                new GameObject("Slock Game").AddComponent<GameManager>();
         }
 
         void Awake()
@@ -76,7 +67,6 @@ namespace Slock
             worldRoot = new GameObject("World").transform;
             slock = SlockController.Create();
             rig.target = slock.transform;
-            slock.TiltRig = rig;
 
             NewWorld();
             state = State.Title;
@@ -587,13 +577,11 @@ namespace Slock
             if (ControlSettings.Trackball)
                 changed |= Slider(ref y, x, w, "Auto-level", ref ControlSettings.Recenter, 0f, 3f, "board drifts back to level when you stop moving");
             changed |= Slider(ref y, x, w, "Tilt response time", ref ControlSettings.TiltSmoothing, 0f, 0.3f, "lower = board follows the mouse instantly");
-            changed |= Slider(ref y, x, w, "Max tilt (degrees)", ref ControlSettings.MaxTilt, 8f, 35f, "how steep the board gets");
-            changed |= Slider(ref y, x, w, "Fall gravity", ref ControlSettings.FallGravity, 5f, 80f, "straight-down acceleration while falling");
-            changed |= Slider(ref y, x, w, "Tilt acceleration", ref ControlSettings.TiltAcceleration, 0f, 80f, "horizontal steering while grounded");
+            changed |= Slider(ref y, x, w, "World tilt (degrees)", ref ControlSettings.MaxTilt, 8f, 35f, "visible tilt and physical downhill use this same angle");
+            changed |= Slider(ref y, x, w, "Gravity strength", ref ControlSettings.FallGravity, 5f, 80f, "magnitude of the tilted world gravity vector");
             changed |= Slider(ref y, x, w, "Braking", ref ControlSettings.SlideDrag, 0.3f, 5f, "higher = stops sooner & slower top speed");
             changed |= Slider(ref y, x, w, "Top speed", ref ControlSettings.MaxSpeed, 5f, 25f, "hard speed limit");
             changed |= Slider(ref y, x, w, "Grid lock", ref ControlSettings.LaneSpring, 20f, 150f, "how firmly it's held on its row");
-            changed |= Slider(ref y, x, w, "Camera tilt", ref ControlSettings.VisualTilt, 0f, 1f, "how much the view tips with the board");
 
             if (changed) ControlSettings.Save();
 

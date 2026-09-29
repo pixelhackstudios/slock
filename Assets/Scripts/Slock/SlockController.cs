@@ -3,7 +3,7 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// The sliding block. Tilt acceleration from <see cref="TiltCameraRig"/> does the pushing; this keeps it locked
+    /// The sliding block. The world's tilted gravity does the pushing; this keeps it locked
     /// to the grid: it always travels along a row or column, corners Pac-Man style, and drops cleanly into holes.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
@@ -32,7 +32,6 @@ namespace Slock
         public float alignSpeed = 12f;
 
         public Rigidbody Body { get; private set; }
-        public TiltCameraRig TiltRig { private get; set; }
         public bool OnRail { get; private set; }
         public bool Grounded { get; private set; }
 
@@ -141,7 +140,7 @@ namespace Slock
             float ts = gridTs;
 
             var v = Body.linearVelocity;
-            var tiltAcceleration = TiltRig != null ? TiltRig.TiltAcceleration : Vector3.zero;
+            var g = Physics.gravity;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
 
             Grounded = Physics.Raycast(p, Vector3.down, out var hit, Height * 0.5f + 0.35f * Size, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
@@ -156,8 +155,6 @@ namespace Slock
                 return;
             }
 
-            Body.AddForce(tiltAcceleration, ForceMode.Acceleration);
-
             // Speed follows tilt: drag balances the tilt's pull, so a small tilt creeps and a full tilt races,
             // and levelling the board brings the block to a stop in about half a second.
             Body.AddForce(new Vector3(-v.x, 0f, -v.z) * slideDrag, ForceMode.Acceleration);
@@ -168,7 +165,7 @@ namespace Slock
 
             // Grid lock: the block always travels along a row or column, like Pac-Man. Tilting toward a wall
             // while sliding keeps it sliding along its row, and it turns into the first opening that way.
-            float gx = Mathf.Abs(tiltAcceleration.x), gz = Mathf.Abs(tiltAcceleration.z);
+            float gx = Mathf.Abs(g.x), gz = Mathf.Abs(g.z);
             if (gz > gx * turnBias) wantZ = true;
             else if (gx > gz * turnBias) wantZ = false;
             bool tilted = Mathf.Max(gx, gz) > 0.8f;
@@ -179,16 +176,16 @@ namespace Slock
             if (!tilted) travelZ = sliding ? movingZ : wantZ;
             else
             {
-                var want = wantZ ? new Vector3(0, 0, Mathf.Sign(tiltAcceleration.z)) : new Vector3(Mathf.Sign(tiltAcceleration.x), 0, 0);
+                var want = wantZ ? new Vector3(0, 0, Mathf.Sign(g.z)) : new Vector3(Mathf.Sign(g.x), 0, 0);
                 bool blocked = Probe(p, want, ts * 0.7f);
                 travelZ = blocked && sliding && movingZ != wantZ ? movingZ : wantZ;
             }
 
-            // Hold the other axis on the grid line, cancelling tilt's sideways pull so it sits exactly on it.
+            // Hold the other axis on the grid line, cancelling gravity's sideways pull so it sits exactly on it.
             var lockAxis = travelZ ? Vector3.right : Vector3.forward;
             float c = Vector3.Dot(p, lockAxis);
             float d = (travelZ ? Snap(c, ts) : SnapZ(c)) - c;
-            Body.AddForce(lockAxis * (d * laneSpring - Vector3.Dot(v, lockAxis) * laneDamping - Vector3.Dot(tiltAcceleration, lockAxis)), ForceMode.Acceleration);
+            Body.AddForce(lockAxis * (d * laneSpring - Vector3.Dot(v, lockAxis) * laneDamping - Vector3.Dot(g, lockAxis)), ForceMode.Acceleration);
             OnRail = true;
 
             var flat = new Vector3(v.x, 0, v.z);
