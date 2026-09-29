@@ -4,6 +4,13 @@
 
 Tilt the world to slide a jelly block through an endless, procedurally generated maze.
 
+![Slock gameplay](docs/screenshots/gameplay.jpg)
+
+| | |
+|---|---|
+| ![Power mode: the worms turn blue and edible](docs/screenshots/power-mode.jpg) | ![A side room full of gold pellets](docs/screenshots/side-room.jpg) |
+| ![The course climbs away into the void](docs/screenshots/overview.jpg) | ![Deeper sections have smaller blocks and denser mazes](docs/screenshots/deep-section.jpg) |
+
 ## What you need
 
 - **Unity 6000.6.3f1** (Unity 6.6), installed through [Unity Hub](https://unity.com/download). The free Personal licence is fine.

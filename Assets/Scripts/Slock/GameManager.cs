@@ -73,6 +73,7 @@ namespace Slock
 
             if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-slockdiag") >= 0)
                 StartCoroutine(Diagnose());
+            PhotoMode.StartIfRequested(this);
         }
 
         /// <summary>
@@ -167,6 +168,12 @@ namespace Slock
 
         /// <summary>Start a run without a click (automated playtests).</summary>
         public void BeginRun() => StartRun();
+
+        /// <summary>Photo mode: make sure sections around <paramref name="current"/> exist before teleporting there.</summary>
+        public void EnsureSections(int current) => StreamChunks(current);
+
+        /// <summary>Photo mode: switch on power mode (blue worms) for a while.</summary>
+        public void ForcePower(float seconds) => powerUntil = Time.time + seconds;
 
         void StartRun()
         {
