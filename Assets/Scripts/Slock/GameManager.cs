@@ -52,8 +52,17 @@ namespace Slock
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
-            if (FindAnyObjectByType<GameManager>() == null)
-                new GameObject("Slock Game").AddComponent<GameManager>();
+            if (FindAnyObjectByType<GameManager>() != null || FindAnyObjectByType<SlockPhysicsTruthTest>() != null)
+                return;
+
+            bool runTruthTest = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-slocktruth") >= 0;
+#if UNITY_EDITOR
+            runTruthTest |= UnityEditor.SessionState.GetBool(SlockPhysicsTruthTest.EditorSessionKey, false);
+            UnityEditor.SessionState.EraseBool(SlockPhysicsTruthTest.EditorSessionKey);
+#endif
+            var game = new GameObject(runTruthTest ? "Slock Physics Truth Test" : "Slock Game");
+            if (runTruthTest) game.AddComponent<SlockPhysicsTruthTest>();
+            else game.AddComponent<GameManager>();
         }
 
         void Awake()
