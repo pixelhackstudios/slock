@@ -566,8 +566,14 @@ namespace Slock
             if (tb != ControlSettings.Trackball) { ControlSettings.Trackball = tb; changed = true; }
             y += 34;
 
+            bool f16 = GUI.Toggle(new Rect(x, y, w, 26), ControlSettings.F16Response,
+                "  F-16-inspired roll response", toggle);
+            if (f16 != ControlSettings.F16Response) { ControlSettings.F16Response = f16; changed = true; }
+            y += 34;
+
             changed |= Slider(ref y, x, w, "Mouse sensitivity", ref ControlSettings.Sensitivity, 0.2f, 3f, "tilt per mouse movement");
-            changed |= Slider(ref y, x, w, "Fine control", ref ControlSettings.ResponseCurve, 1f, 3f, "higher = gentler near level, same full tilt");
+            if (!ControlSettings.F16Response)
+                changed |= Slider(ref y, x, w, "Fine control", ref ControlSettings.ResponseCurve, 1f, 3f, "higher = gentler near level, same full tilt");
             if (ControlSettings.Trackball)
                 changed |= Slider(ref y, x, w, "Auto-level", ref ControlSettings.Recenter, 0f, 3f, "board drifts back to level when you stop moving");
             changed |= Slider(ref y, x, w, "Tilt response time", ref ControlSettings.TiltSmoothing, 0f, 0.3f, "lower = board follows the mouse instantly");

@@ -10,12 +10,14 @@ namespace Slock
     {
         // Defaults
         const bool DefTrackball = true;
+        const bool DefF16Response = false;
         const float DefSensitivity = 1f, DefCurve = 1.6f, DefRecenter = 0f, DefSmoothing = 0.06f, DefMaxTilt = 24f,
                     DefGravity = 45f, DefSlideDrag = 1.8f, DefMaxSpeed = 16f, DefLaneSpring = 70f, DefVisualTilt = 0.45f;
 
         /// <summary>Trackball: the (hidden) mouse nudges the tilt and it stays put. Otherwise the cursor's distance
         /// from screen centre sets the tilt.</summary>
         public static bool Trackball = DefTrackball;
+        public static bool F16Response = DefF16Response;
         public static float Sensitivity = DefSensitivity;   // tilt per unit of mouse movement
         public static float ResponseCurve = DefCurve;       // 1 = linear; higher = gentler near level (fine control)
         public static float Recenter = DefRecenter;         // trackball: how fast the board drifts back to level (/s)
@@ -32,6 +34,7 @@ namespace Slock
         public static void Load()
         {
             Trackball = PlayerPrefs.GetInt(Key + "trackball", DefTrackball ? 1 : 0) == 1;
+            F16Response = PlayerPrefs.GetInt(Key + "f16Response", DefF16Response ? 1 : 0) == 1;
             Sensitivity = PlayerPrefs.GetFloat(Key + "sensitivity", DefSensitivity);
             ResponseCurve = PlayerPrefs.GetFloat(Key + "curve", DefCurve);
             Recenter = PlayerPrefs.GetFloat(Key + "recenter", DefRecenter);
@@ -47,6 +50,7 @@ namespace Slock
         public static void Save()
         {
             PlayerPrefs.SetInt(Key + "trackball", Trackball ? 1 : 0);
+            PlayerPrefs.SetInt(Key + "f16Response", F16Response ? 1 : 0);
             PlayerPrefs.SetFloat(Key + "sensitivity", Sensitivity);
             PlayerPrefs.SetFloat(Key + "curve", ResponseCurve);
             PlayerPrefs.SetFloat(Key + "recenter", Recenter);
@@ -63,6 +67,7 @@ namespace Slock
         public static void ResetDefaults()
         {
             Trackball = DefTrackball;
+            F16Response = DefF16Response;
             Sensitivity = DefSensitivity;
             ResponseCurve = DefCurve;
             Recenter = DefRecenter;
