@@ -13,9 +13,12 @@ namespace Slock
     /// "Resolution" climbs as you go: every gate shrinks the block size by <see cref="BlockStep"/> (60 -> 58 -> 56 ...),
     /// while a section keeps roughly the same footprint, so each section has more, smaller cells than the last.
     ///
-    /// Side rooms hang off a section at a lower level: one off the maze's left edge, and one off a landing halfway
-    /// up the climbing ramp (right side). Each is reached by a ramp you slide down, which boosts you back up.
+    /// Side rooms hang off a section at a lower level: one off the maze's left edge, reached by a ramp
+    /// you slide down, which boosts you back up.
     /// Their pellets count toward opening the gate; they also hold a power gem and either a big clock or a gate key.
+    ///
+    /// The entry climb ramp past each gate is deliberately room-free and smooth: a single slope with a small
+    /// booster so the slock can always make the Rise to the next section.
     ///
     /// Positions use "keys": (ix, k) where world x = ix * TileSize and world z = Z0 + k * TileSize.
     /// The ramp occupies rows k = 0..RampTiles-1, the main maze rows k = RampTiles..RampTiles+L-1.
@@ -137,9 +140,7 @@ namespace Slock
             var mb = new MeshBuilder(TileSize, Z0, FloorY);
             if (rng.NextDouble() < d.EdgeRoomChance) BuildEdgeRoom(mb, rng, d);
             AddTiles(mb, Tiles, depth, FloorY, MainKey, 1);
-            bool landingRoom = rng.NextDouble() < d.RampRoomChance;
-            BuildClimbRamp(mb, landingRoom);
-            if (landingRoom) BuildRampRoom(mb, rng, d);
+            BuildClimbRamp(mb);
             FinishMesh(mb);
 
             SpawnCheckpoint();
@@ -328,24 +329,6 @@ namespace Slock
             AddTiles(mb, room.t, room.depth, room.floorY, room.Key, -1);
         }
 
-        /// <summary>A side room off a flat landing halfway up the climbing ramp, to the right.</summary>
-        void BuildRampRoom(MeshBuilder mb, System.Random rng, Difficulty d)
-        {
-            int m = LandingRow;
-            float midY = LandingY;
-            int rampLen = Center + 2;                                  // clears the main maze's right edge
-            int w = Odd(rng.Next(7, 10) / TileSize), l = Odd(rng.Next(7, 10) / TileSize);
-            int maxEntrance = Mathf.Min(m, l - 2);                     // <= m keeps the room inside this section
-            if (maxEntrance % 2 == 0) maxEntrance--;
-            int entrance = 1 + 2 * rng.Next(0, (maxEntrance - 1) / 2 + 1);
-            int k0 = m - entrance;
-
-            float xNear = TileSize * 0.5f, xFar = xNear + rampLen * TileSize;
-            AddSideRamp(mb, xNear, xFar, midY, midY - SideDrop, m, -1f);
-            var room = MakeRoom(rng, d, +1, rampLen + 1, k0, w, l, entrance, midY - SideDrop);
-            AddTiles(mb, room.t, room.depth, room.floorY, room.Key, +1);
-        }
-
         /// <summary>
         /// A one-block-wide ramp running along X between <paramref name="x0"/> (height y0) and <paramref name="x1"/> (y1),
         /// on grid row <paramref name="k"/>, with walls either side and a booster that launches the slock toward the top.
@@ -411,11 +394,9 @@ namespace Slock
             }
         }
 
-        int LandingRow => RampTiles / 2;
-        float LandingY => (FloorYOf(Index - 1) + FloorY) * 0.5f;
-
-        /// <summary>The one-block corridor climbing from the previous section, optionally with a flat landing + right-hand gap.</summary>
-        void BuildClimbRamp(MeshBuilder mb, bool landing)
+        /// <summary>The one-block corridor climbing from the previous section: one smooth slope with a small
+        /// booster so the slock always makes the Rise. No side rooms leave this ramp (it sits past the gate).</summary>
+        void BuildClimbRamp(MeshBuilder mb)
         {
             float h = TileSize * 0.5f;
             float prevY = FloorYOf(Index - 1);
@@ -423,31 +404,37 @@ namespace Slock
             float bot = Mathf.Min(prevY, FloorY) - 3f;
             var all = MeshBuilder.Faces.All;
 
-            if (!landing)
-            {
-                mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
-                mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-            }
-            else
-            {
-                float midY = LandingY;
-                float zL0 = Z0 + (LandingRow - 0.5f) * TileSize, zL1 = zL0 + TileSize;
-                // floor: slope, flat landing, slope
-                mb.Prism(-h, h, zA, zL0, bot, prevY, bot, midY, all);
-                mb.Prism(-h, h, zL0, zL1, bot, midY, bot, midY, all);
-                mb.Prism(-h, h, zL1, zB, bot, midY, bot, FloorY, all);
-                // left wall: continuous
-                mb.Prism(-3 * h, -h, zA, zL0, bot, prevY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(-3 * h, -h, zL0, zL1, bot, midY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(-3 * h, -h, zL1, zB, bot, midY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-                // right wall: gap at the landing, where the side ramp leaves
-                mb.Prism(h, 3 * h, zA, zL0, bot, prevY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(h, 3 * h, zL1, zB, bot, midY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-            }
+            mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
+            mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
+            mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
 
             if (Index == 0) // back wall so you can't slide off the start
                 mb.Prism(-3 * h, 3 * h, zA - TileSize, zA, bot, WallHeight, bot, WallHeight, all, MeshBuilder.WallTopSub);
+
+            if (FloorY <= prevY) return; // start section is flat: geometry only, no booster
+            // Small booster over the slope, launching uphill (+Z) toward the maze.
+            float midY = (prevY + FloorY) * 0.5f, midZ = (zA + zB) * 0.5f;
+            var go = new GameObject("Climb Boost");
+            go.transform.SetParent(transform, false);
+            go.transform.position = new Vector3(0f, midY + TileSize, midZ);
+            var box = go.AddComponent<BoxCollider>();
+            box.isTrigger = true;
+            box.size = new Vector3(TileSize * 0.9f, Mathf.Abs(FloorY - prevY) + TileSize * 2f, (zB - zA) + TileSize);
+            go.AddComponent<BoostRamp>().up = new Vector3(0f, 0f, 1f);
+
+            float slope = Mathf.Atan2(FloorY - prevY, zB - zA) * Mathf.Rad2Deg;
+            int chevrons = Mathf.Max(2, Mathf.RoundToInt((zB - zA) / (TileSize * 1.5f)));
+            for (int i = 0; i < chevrons; i++)
+            {
+                float f = (i + 0.5f) / chevrons;
+                var p = new Vector3(0f, Mathf.Lerp(prevY, FloorY, f) + 0.06f * TileSize, Mathf.Lerp(zA, zB, f));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    var bar = Decor(PrimitiveType.Cube, go.transform, Vector3.zero, new Vector3(TileSize * 0.45f, 0.04f * TileSize, TileSize * 0.12f), Visuals.Boost);
+                    bar.transform.position = p + new Vector3(side * TileSize * 0.17f, 0f, 0f);
+                    bar.transform.rotation = Quaternion.Euler(-slope, side * 35f, 0f);
+                }
+            }
         }
 
         void FinishMesh(MeshBuilder mb)
@@ -657,7 +644,7 @@ namespace Slock
     /// <summary>How nasty chunk N is. Everything ramps up and then plateaus.</summary>
     public struct Difficulty
     {
-        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance, RampRoomChance;
+        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance;
         public int MinRooms, MaxRooms, Pickups, Worms;
 
         public static Difficulty For(int i) => new()
@@ -672,7 +659,6 @@ namespace Slock
             WormSpeed = Mathf.Min(5f, 2.2f + i * 0.15f),
             TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
             EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
-            RampRoomChance = i == 0 ? 0f : 0.45f,
         };
     }
 }

@@ -131,6 +131,27 @@ namespace Slock
             Body.AddForce(direction.normalized * speed + Vector3.up * 2f, ForceMode.VelocityChange);
         }
 
+        /// <summary>Bounce away from <paramref name="fromPosition"/> hard enough to slide about
+        /// <paramref name="tiles"/> grid blocks (3 by default), plus a small hop.</summary>
+        public void BounceBack(Vector3 fromPosition, float tiles = 3f)
+        {
+            var away = transform.position - fromPosition;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1e-6f)
+            {
+                away = Body.linearVelocity;
+                away.y = 0f;
+            }
+            if (away.sqrMagnitude < 1e-6f) away = Vector3.back;
+            away.Normalize();
+            // v = sqrt(2*a*d): friction is the only resistance, so this slides ~tiles blocks.
+            float a = Mathf.Max(0.5f, ControlSettings.Friction * ControlSettings.FallGravity);
+            float speed = Mathf.Sqrt(2f * a * tiles * Size);
+            speed = Mathf.Clamp(speed, 2.5f, 12f);
+            Body.linearVelocity = new Vector3(away.x * speed, Body.linearVelocity.y, away.z * speed);
+            Body.AddForce(Vector3.up * 2f, ForceMode.VelocityChange);
+        }
+
         void FixedUpdate()
         {
             if (!Mathf.Approximately(Size, targetSize))

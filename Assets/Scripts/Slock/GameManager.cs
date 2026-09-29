@@ -358,16 +358,22 @@ namespace Slock
                 wormsEaten++;
                 bonusScore += pts;
                 timeLeft += WormTime;
+                float refund = worm.stolenTime;
+                worm.stolenTime = 0f;
+                if (refund > 0.05f) timeLeft += refund;
                 worm.GetEaten(WormRespawn);
-                Popup($"CHOMP! +{pts}   +{WormTime:0}s", new Color(0.4f, 0.6f, 1f), 1.2f);
+                string back = refund > 0.05f ? $"   +{refund:0}s back" : "";
+                Popup($"CHOMP! +{pts}   +{WormTime:0}s{back}", new Color(0.4f, 0.6f, 1f), 1.2f);
                 return;
             }
             if (wormCooldown.TryGetValue(worm, out var until) && Time.time < until) return;
             wormCooldown[worm] = Time.time + 1f;
-            s.Knock(s.transform.position - worm.transform.position, 7f);
-            timeLeft -= 3f;
+            s.BounceBack(worm.transform.position, 3f);
+            float stolen = timeLeft / 3f;
+            timeLeft -= stolen;
+            worm.stolenTime += stolen;
             flash = 1f;
-            Popup("-3s", new Color(0.5f, 1f, 0.2f), 1f);
+            Popup($"-{stolen:0}s", new Color(0.5f, 1f, 0.2f), 1f);
         }
 
         void Popup(string text, Color color, float seconds) =>
