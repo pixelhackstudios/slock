@@ -18,3 +18,7 @@ Tilt the world to slide a jelly block through an endless, procedurally generated
 For other platforms, use **File → Build Profiles**, pick your platform and click **Build**.
 
 To just play it in the editor, open `Assets/Scenes/SampleScene` and press **▶ Play**.
+
+## Licence
+
+Code: [MIT](LICENSE). Art: [CC BY 4.0](LICENSE-ART.md). Please credit Pixelhack Studios (Scott O'Nanski) — https://www.pixelhackstudios.com
