@@ -4,9 +4,9 @@ using UnityEngine;
 
 /// <summary>
 /// One-click / command-line builds. From a terminal (with the editor closed):
-///   Unity -batchmode -quit -projectPath . -executeMethod SlockBuild.Linux   (or .Windows, .Mac, .Web, .All)
+///   Unity -batchmode -quit -projectPath . -executeMethod SlockBuild.Linux   (or .Windows, .Mac, .All)
 ///   Unity -batchmode -quit -projectPath . -executeMethod SlockBuild.EnsureAssets
-/// Or in the editor: menu Slock > Build Linux / Windows / Mac / Web / All. Output goes to Builds/&lt;platform&gt;/.
+/// Or in the editor: menu Slock > Build Linux / Windows / Mac / All. Output goes to Builds/&lt;platform&gt;/.
 /// </summary>
 public static class SlockBuild
 {
@@ -142,27 +142,13 @@ public static class SlockBuild
     [MenuItem("Slock/Build Mac")]
     public static void Mac() => Finish(Build(BuildTarget.StandaloneOSX, "Builds/Mac/Slock.app"));
 
-    /// <summary>Browser build, ready to drop into GitHub Pages: open Builds/Web/index.html from any static host.</summary>
-    [MenuItem("Slock/Build Web")]
-    public static void Web() => Finish(BuildWeb());
-
     [MenuItem("Slock/Build All")]
     public static void All()
     {
         bool ok = Build(BuildTarget.StandaloneLinux64, "Builds/Linux/Slock.x86_64");
         ok &= Build(BuildTarget.StandaloneWindows64, "Builds/Windows/Slock.exe");
         ok &= Build(BuildTarget.StandaloneOSX, "Builds/Mac/Slock.app");
-        ok &= BuildWeb();
         Finish(ok);
-    }
-
-    static bool BuildWeb()
-    {
-        // GitHub Pages can't send the Content-Encoding headers a compressed Unity web build normally needs;
-        // gzip + decompression fallback lets the page unpack the files itself, so any static host works.
-        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
-        PlayerSettings.WebGL.decompressionFallback = true;
-        return Build(BuildTarget.WebGL, "Builds/Web");
     }
 
     static bool Build(BuildTarget target, string path)
