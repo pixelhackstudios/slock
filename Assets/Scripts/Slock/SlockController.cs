@@ -13,7 +13,7 @@ namespace Slock
         public float Size { get; private set; } = 1f;
         public float Height => Size * 1.1f;      // a hair taller than the walls (which are Size tall)
         const float Shrink = 0.01f;              // hull undersize vs a tile (1%): stops wedging, stays grid-true
-        // Compensation for this collider's flat-face contact patch: measured (SlockResponseProbe), a sliding box here is
+        // Compensation for this collider's flat-face contact patch: measured (coast test on a level floor), a sliding box here is
         // slowed by exactly twice the material's friction coefficient (PhysX friction patches use multiple contact points).
         // The material gets half of ControlSettings.Friction so that value is the real mu. Re-measure if the collider shape changes.
         const float PhysxPatchFrictionCompensation = 0.5f;

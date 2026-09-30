@@ -82,7 +82,6 @@ namespace Slock
             if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-slockdiag") >= 0)
                 StartCoroutine(Diagnose());
             PhotoMode.StartIfRequested(this);
-            AutoPlay.StartIfRequested(this);
         }
 
         /// <summary>
