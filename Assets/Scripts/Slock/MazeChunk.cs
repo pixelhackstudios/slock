@@ -10,12 +10,18 @@ namespace Slock
     /// chunk's height, then a W x L tile maze with rooms, pits, open edges, pellets, gems and worms.
     /// Chunks are laid end to end along +Z, each one <see cref="Rise"/> higher than the last.
     ///
+    /// At the centre sits a slorm pen (Pac-Man style): a small wall ring with one opening. Slorms start
+    /// inside it and crawl out; it holds no pellets or pickups.
+    ///
     /// "Resolution" climbs as you go: every gate shrinks the block size by <see cref="BlockStep"/> (60 -> 58 -> 56 ...),
     /// while a section keeps roughly the same footprint, so each section has more, smaller cells than the last.
     ///
-    /// Side rooms hang off a section at a lower level: one off the maze's left edge, and one off a landing halfway
-    /// up the climbing ramp (right side). Each is reached by a ramp you slide down, which boosts you back up.
+    /// Side rooms hang off a section at a lower level: one off the maze's left edge, reached by a ramp
+    /// you slide down, which boosts you back up.
     /// Their pellets count toward opening the gate; they also hold a power gem and either a big clock or a gate key.
+    ///
+    /// The entry climb ramp past each gate is deliberately room-free and smooth: a single slope with a small
+    /// booster so the slock can always make the Rise to the next section.
     ///
     /// Positions use "keys": (ix, k) where world x = ix * TileSize and world z = Z0 + k * TileSize.
     /// The ramp occupies rows k = 0..RampTiles-1, the main maze rows k = RampTiles..RampTiles+L-1.
@@ -23,7 +29,7 @@ namespace Slock
     public class MazeChunk : MonoBehaviour
     {
         public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
-        const float BaseWidth = 15f, BaseLength = 21f, RampLength = 6f;
+        const float BaseWidth = 25f, BaseLength = 31f, RampLength = 6f;
         public const float Rise = 1.0f;
         const float SideDrop = 1.5f;       // how far below its entrance a side room sits
 
@@ -73,6 +79,7 @@ namespace Slock
         public float FloorY { get; private set; }
         public float Z0 { get; private set; }
         public Tile[,] Tiles { get; private set; }
+        float[,] mainDepth;
 
         /// <summary>Pellets still uneaten in this section (main maze + side rooms); the gate opens at 0.</summary>
         public int PelletsLeft => pellets.Count;
@@ -81,9 +88,14 @@ namespace Slock
         class Pellet { public GameObject go; public bool gold; }
         readonly Dictionary<Vector2Int, Pellet> pellets = new();
         readonly HashSet<Vector2Int> reserved = new();     // keys holding a pickup: no pellet there
+        readonly HashSet<Vector2Int> penCells = new();     // slorm-pen floor (maze-local): no pellets or pickups
+        readonly List<Vector2Int> penHomes = new();        // slorm starting blocks inside the pen (maze-local)
+        int penX0, penZ0, penX1, penZ1;                    // pen bounds (maze-local, inclusive)
         struct Floater { public Transform t; public Vector3 home; public float phase, spin, bob; }
         readonly List<Floater> floaters = new();
         GameObject gate;
+        GameObject checkpoint;
+        bool exitSealed;
 
         /// <summary>A lower bonus area: its own tile grid, mirrored to the left (sign -1) or right (sign +1).</summary>
         class SideRoom
@@ -95,6 +107,7 @@ namespace Slock
             public Vector2Int Key(int lx, int lz) => new(sign * (ix0 + lx), k0 + lz);
         }
         readonly List<SideRoom> rooms = new();
+        readonly List<Worm> slorms = new();
 
         public Vector2Int KeyAt(Vector3 world) =>
             new(Mathf.RoundToInt(world.x / TileSize), Mathf.RoundToInt((world.z - Z0) / TileSize));
@@ -133,13 +146,12 @@ namespace Slock
             var d = Difficulty.For(index);
 
             Tiles = GenerateLayout(rng, d, out var depth);
+            mainDepth = depth;
 
             var mb = new MeshBuilder(TileSize, Z0, FloorY);
             if (rng.NextDouble() < d.EdgeRoomChance) BuildEdgeRoom(mb, rng, d);
             AddTiles(mb, Tiles, depth, FloorY, MainKey, 1);
-            bool landingRoom = rng.NextDouble() < d.RampRoomChance;
-            BuildClimbRamp(mb, landingRoom);
-            if (landingRoom) BuildRampRoom(mb, rng, d);
+            BuildClimbRamp(mb);
             FinishMesh(mb);
 
             SpawnCheckpoint();
@@ -184,12 +196,59 @@ namespace Slock
                 }
             }
 
+            // Slorm pen at the centre (Pac-Man style): walls with one opening, slorms start inside.
+            CarveSlormPen(t);
+
             // Guarantee the exit is reachable; if pits cut the path, fill them in.
             if (DistanceMap(t, new(Center, 0))[Center, L - 1] < 0)
                 foreach (var p in pits) t[p.x, p.y] = Tile.Floor;
+            // If the pen itself cut the only path, open it up rather than trap the player.
+            if (DistanceMap(t, new(Center, 0))[Center, L - 1] < 0)
+                ClearSlormPen(t);
 
             depth = EdgeDepths(t, rng, 0, W - 1);
             return t;
+        }
+
+        /// <summary>Centre pen the slorms start in: a 6x4 wall ring (maze-local) with one opening toward the exit and a
+        /// 4x2 floor inside, standing clear in a one-block empty corridor all the way round (so it always reads as a
+        /// rectangle, and any maze corridor it cuts still connects via that ring). Registers <see cref="penCells"/>
+        /// (no pellets or pickups there) and <see cref="penHomes"/> (slorm starting blocks).</summary>
+        void CarveSlormPen(Tile[,] t)
+        {
+            penCells.Clear();
+            penHomes.Clear();
+            int cx = Center;
+            int cz = L / 2;
+            if (cz % 2 == 0) cz++; // sit on a maze-cell row
+            int x0 = cx - 2, x1 = cx + 3, z0 = cz - 1, z1 = cz + 2;   // 4x2 = 8 open blocks inside, opening at cx
+            if (x0 - 1 < 1 || x1 + 1 > W - 2 || z0 - 1 < 2 || z1 + 1 > L - 2) return; // too small: skip the pen
+            penX0 = x0 - 1; penZ0 = z0 - 1; penX1 = x1 + 1; penZ1 = z1 + 1;
+            for (int x = penX0; x <= penX1; x++)
+            for (int z = penZ0; z <= penZ1; z++)
+            {
+                bool ring = x == penX0 || x == penX1 || z == penZ0 || z == penZ1;
+                bool edge = x == x0 || x == x1 || z == z0 || z == z1;
+                bool opening = x == cx && z == z1;
+                t[x, z] = ring || !edge || opening ? Tile.Floor : Tile.Wall;
+            }
+            for (int x = x0 + 1; x <= x1 - 1; x++)
+            for (int z = z0 + 1; z <= z1 - 1; z++)
+            {
+                penCells.Add(new(x, z));
+                penHomes.Add(new(x, z));
+            }
+            penCells.Add(new(cx, z1));
+        }
+
+        /// <summary>Fallback when the pen blocks the only entry-to-exit path: flatten it to open floor.</summary>
+        void ClearSlormPen(Tile[,] t)
+        {
+            for (int x = penX0; x <= penX1; x++)
+            for (int z = penZ0; z <= penZ1; z++)
+                t[x, z] = Tile.Floor;
+            penCells.Clear();
+            penHomes.Clear();
         }
 
         /// <summary>Perfect maze (recursive backtracker on odd cells) from <paramref name="start"/>, plus some loops.</summary>
@@ -328,36 +387,30 @@ namespace Slock
             AddTiles(mb, room.t, room.depth, room.floorY, room.Key, -1);
         }
 
-        /// <summary>A side room off a flat landing halfway up the climbing ramp, to the right.</summary>
-        void BuildRampRoom(MeshBuilder mb, System.Random rng, Difficulty d)
-        {
-            int m = LandingRow;
-            float midY = LandingY;
-            int rampLen = Center + 2;                                  // clears the main maze's right edge
-            int w = Odd(rng.Next(7, 10) / TileSize), l = Odd(rng.Next(7, 10) / TileSize);
-            int maxEntrance = Mathf.Min(m, l - 2);                     // <= m keeps the room inside this section
-            if (maxEntrance % 2 == 0) maxEntrance--;
-            int entrance = 1 + 2 * rng.Next(0, (maxEntrance - 1) / 2 + 1);
-            int k0 = m - entrance;
-
-            float xNear = TileSize * 0.5f, xFar = xNear + rampLen * TileSize;
-            AddSideRamp(mb, xNear, xFar, midY, midY - SideDrop, m, -1f);
-            var room = MakeRoom(rng, d, +1, rampLen + 1, k0, w, l, entrance, midY - SideDrop);
-            AddTiles(mb, room.t, room.depth, room.floorY, room.Key, +1);
-        }
-
         /// <summary>
         /// A one-block-wide ramp running along X between <paramref name="x0"/> (height y0) and <paramref name="x1"/> (y1),
         /// on grid row <paramref name="k"/>, with walls either side and a booster that launches the slock toward the top.
         /// </summary>
         void AddSideRamp(MeshBuilder mb, float x0, float x1, float y0, float y1, int k, float upSign)
         {
+            AddSideRampGeometry(mb, x0, x1, y0, y1, k);
+            SpawnSideBoost(x0, x1, y0, y1, k, upSign);
+        }
+
+        /// <summary>Side-ramp prisms only (no booster objects), so the mesh can be rebuilt after a wall breach.</summary>
+        void AddSideRampGeometry(MeshBuilder mb, float x0, float x1, float y0, float y1, int k)
+        {
             float z = Z0 + k * TileSize, h = TileSize * 0.5f;
             float bot = Mathf.Min(y0, y1) - 3f;
             mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All);
             mb.PrismX(x0, x1, z - 3 * h, z - h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
             mb.PrismX(x0, x1, z + h, z + 3 * h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
+        }
 
+        /// <summary>Side-ramp booster trigger + chevrons.</summary>
+        void SpawnSideBoost(float x0, float x1, float y0, float y1, int k, float upSign)
+        {
+            float z = Z0 + k * TileSize;
             // Booster: a trigger over the ramp plus glowing chevrons pointing uphill.
             var go = new GameObject("Boost Ramp");
             go.transform.SetParent(transform, false);
@@ -411,11 +464,16 @@ namespace Slock
             }
         }
 
-        int LandingRow => RampTiles / 2;
-        float LandingY => (FloorYOf(Index - 1) + FloorY) * 0.5f;
+        /// <summary>The one-block corridor climbing from the previous section: one smooth slope with a small
+        /// booster so the slock always makes the Rise. No side rooms leave this ramp (it sits past the gate).</summary>
+        void BuildClimbRamp(MeshBuilder mb)
+        {
+            BuildClimbRampGeometry(mb);
+            SpawnClimbBoost();
+        }
 
-        /// <summary>The one-block corridor climbing from the previous section, optionally with a flat landing + right-hand gap.</summary>
-        void BuildClimbRamp(MeshBuilder mb, bool landing)
+        /// <summary>Climb-ramp prisms only (no booster objects), so the mesh can be rebuilt after a wall breach.</summary>
+        void BuildClimbRampGeometry(MeshBuilder mb)
         {
             float h = TileSize * 0.5f;
             float prevY = FloorYOf(Index - 1);
@@ -423,31 +481,44 @@ namespace Slock
             float bot = Mathf.Min(prevY, FloorY) - 3f;
             var all = MeshBuilder.Faces.All;
 
-            if (!landing)
-            {
-                mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
-                mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-            }
-            else
-            {
-                float midY = LandingY;
-                float zL0 = Z0 + (LandingRow - 0.5f) * TileSize, zL1 = zL0 + TileSize;
-                // floor: slope, flat landing, slope
-                mb.Prism(-h, h, zA, zL0, bot, prevY, bot, midY, all);
-                mb.Prism(-h, h, zL0, zL1, bot, midY, bot, midY, all);
-                mb.Prism(-h, h, zL1, zB, bot, midY, bot, FloorY, all);
-                // left wall: continuous
-                mb.Prism(-3 * h, -h, zA, zL0, bot, prevY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(-3 * h, -h, zL0, zL1, bot, midY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(-3 * h, -h, zL1, zB, bot, midY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-                // right wall: gap at the landing, where the side ramp leaves
-                mb.Prism(h, 3 * h, zA, zL0, bot, prevY + WallHeight, bot, midY + WallHeight, all, MeshBuilder.WallTopSub);
-                mb.Prism(h, 3 * h, zL1, zB, bot, midY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
-            }
+            mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
+            mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
+            mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
 
             if (Index == 0) // back wall so you can't slide off the start
                 mb.Prism(-3 * h, 3 * h, zA - TileSize, zA, bot, WallHeight, bot, WallHeight, all, MeshBuilder.WallTopSub);
+        }
+
+        /// <summary>Climb-ramp booster trigger + chevrons. Skipped on the flat start section.</summary>
+        void SpawnClimbBoost()
+        {
+            float h = TileSize * 0.5f;
+            float prevY = FloorYOf(Index - 1);
+            float zA = Z0 - h, zB = Z0 + (RampTiles - 0.5f) * TileSize;
+            if (FloorY <= prevY) return; // start section is flat: geometry only, no booster
+            // Small booster over the slope, launching uphill (+Z) toward the maze.
+            float midY = (prevY + FloorY) * 0.5f, midZ = (zA + zB) * 0.5f;
+            var go = new GameObject("Climb Boost");
+            go.transform.SetParent(transform, false);
+            go.transform.position = new Vector3(0f, midY + TileSize, midZ);
+            var box = go.AddComponent<BoxCollider>();
+            box.isTrigger = true;
+            box.size = new Vector3(TileSize * 0.9f, Mathf.Abs(FloorY - prevY) + TileSize * 2f, (zB - zA) + TileSize);
+            go.AddComponent<BoostRamp>().up = new Vector3(0f, 0f, 1f);
+
+            float slope = Mathf.Atan2(FloorY - prevY, zB - zA) * Mathf.Rad2Deg;
+            int chevrons = Mathf.Max(2, Mathf.RoundToInt((zB - zA) / (TileSize * 1.5f)));
+            for (int i = 0; i < chevrons; i++)
+            {
+                float f = (i + 0.5f) / chevrons;
+                var p = new Vector3(0f, Mathf.Lerp(prevY, FloorY, f) + 0.06f * TileSize, Mathf.Lerp(zA, zB, f));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    var bar = Decor(PrimitiveType.Cube, go.transform, Vector3.zero, new Vector3(TileSize * 0.45f, 0.04f * TileSize, TileSize * 0.12f), Visuals.Boost);
+                    bar.transform.position = p + new Vector3(side * TileSize * 0.17f, 0f, 0f);
+                    bar.transform.rotation = Quaternion.Euler(-slope, side * 35f, 0f);
+                }
+            }
         }
 
         void FinishMesh(MeshBuilder mb)
@@ -456,7 +527,51 @@ namespace Slock
             gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = gameObject.AddComponent<MeshRenderer>();
             mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop };
-            gameObject.AddComponent<MeshCollider>().sharedMesh = mesh;
+            // MeshBuilder emits each quad with its own vertices; weld them so the collision surface is one clean mesh.
+            var mc = gameObject.AddComponent<MeshCollider>();
+            mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
+                              | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
+            mc.sharedMesh = mesh;
+        }
+
+        /// <summary>Blast one wall block (maze-local <paramref name="tx"/>, <paramref name="tz"/>) into open floor,
+        /// e.g. the slock's emergency slug. Rebuilds the mesh; adds no pellet, so the gate count is unchanged.</summary>
+        public bool TryBlastWall(int tx, int tz)
+        {
+            if (Tiles == null || tx < 0 || tx >= W || tz < 0 || tz >= L) return false;
+            if (tx == 0 || tx == W - 1 || tz == 0 || tz == L - 1) return false; // outer boundary: never (no falling off)
+            if (Tiles[tx, tz] != Tile.Wall) return false;
+            Tiles[tx, tz] = Tile.Floor;
+            RebuildMesh();
+            return true;
+        }
+
+        /// <summary>Rebuild the render + collision mesh from the current tiles (geometry only: boosters are kept).</summary>
+        void RebuildMesh()
+        {
+            var mb = new MeshBuilder(TileSize, Z0, FloorY);
+            foreach (var r in rooms) // only left edge rooms exist; replay their prisms from the stored room
+            {
+                int rampLen = Mathf.Abs(r.ix0) - Center - 1;
+                float xNear = -(Center + 0.5f) * TileSize, xFar = xNear - rampLen * TileSize;
+                AddSideRampGeometry(mb, xFar, xNear, r.floorY, FloorY, r.k0 + r.entrance);
+                AddTiles(mb, r.t, r.depth, r.floorY, r.Key, r.sign);
+            }
+            AddTiles(mb, Tiles, mainDepth, FloorY, MainKey, 1);
+            BuildClimbRampGeometry(mb);
+            var mesh = mb.Build(name);
+            var mf = GetComponent<MeshFilter>();
+            if (mf != null)
+            {
+                if (mf.sharedMesh != null) Destroy(mf.sharedMesh);
+                mf.sharedMesh = mesh;
+            }
+            var mc = GetComponent<MeshCollider>();
+            if (mc != null)
+            {
+                mc.sharedMesh = null;
+                mc.sharedMesh = mesh;
+            }
         }
 
         // ------------------------------------------------------------------ contents
@@ -464,7 +579,7 @@ namespace Slock
         void SpawnCheckpoint()
         {
             var c = TileCenter(Center, L - 1);
-            var go = new GameObject("Checkpoint");
+            var go = checkpoint = new GameObject("Checkpoint");
             go.transform.SetParent(transform, false);
             go.transform.position = c + Vector3.up * 1f;
             var box = go.AddComponent<BoxCollider>();
@@ -506,6 +621,7 @@ namespace Slock
             for (int z = 2; z < L - 2; z++)
             {
                 if (!IsFloor(x, z)) continue;
+                if (penCells.Contains(new(x, z))) continue; // slorm pen: no pickups inside
                 int n = (IsFloor(x + 1, z) ? 1 : 0) + (IsFloor(x - 1, z) ? 1 : 0) + (IsFloor(x, z + 1) ? 1 : 0) + (IsFloor(x, z - 1) ? 1 : 0);
                 (n == 1 ? deadEnds : others).Add(new(x, z));
             }
@@ -542,7 +658,7 @@ namespace Slock
             var reach = DistanceMap(Tiles, new Vector2Int(Center, 0));
             for (int x = 0; x < W; x++)
             for (int z = 0; z < L - 1; z++) // not the exit tile: that's where the gate sits
-                if (reach[x, z] >= 0) AddPellet(root, MainKey(x, z), FloorY, false);
+                if (reach[x, z] >= 0 && !penCells.Contains(new(x, z))) AddPellet(root, MainKey(x, z), FloorY, false);
 
             foreach (var r in rooms)
             {
@@ -587,6 +703,15 @@ namespace Slock
             }
         }
 
+        /// <summary>World positions of all currently uneaten pellets (main maze + side rooms).</summary>
+        public List<Vector3> UneatenPelletPositions()
+        {
+            var list = new List<Vector3>(pellets.Count);
+            foreach (var kv in pellets)
+                if (kv.Value.go != null) list.Add(kv.Value.go.transform.position);
+            return list;
+        }
+
         /// <summary>Eat the pellet on the block under <paramref name="world"/>, if any (main maze or side room).</summary>
         public bool TryEatPellet(Vector3 world, out bool gold)
         {
@@ -601,6 +726,18 @@ namespace Slock
             return true;
         }
 
+        /// <summary>The player has gone through: wall the exit up behind them so this section can't be re-entered
+        /// (an outer-boundary block, so slugs can't reopen it).</summary>
+        public void SealExit()
+        {
+            if (exitSealed || Tiles == null) return;
+            exitSealed = true;
+            Tiles[Center, L - 1] = Tile.Wall;
+            RebuildMesh();
+            if (checkpoint != null) Destroy(checkpoint);
+            gate = null;
+        }
+
         public void OpenGate()
         {
             if (gate != null) Destroy(gate);
@@ -609,19 +746,45 @@ namespace Slock
 
         void SpawnWorms(System.Random rng, Difficulty d)
         {
+            // Slorms start in the centre pen (Pac-Man style) and crawl out through its opening.
+            var homes = new List<Vector2Int>();
+            foreach (var c in penHomes)
+                if (IsCrawlable(c.x, c.y)) homes.Add(c);
+            Shuffle(homes, rng);
+
             var cells = new List<Vector2Int>();
             for (int x = 1; x < W - 1; x++)
             for (int z = 5; z < L - 2; z++)
                 if (IsCrawlable(x, z)) cells.Add(new(x, z));
             Shuffle(cells, rng);
 
-            for (int i = 0; i < Mathf.Min(d.Worms, cells.Count); i++)
+            for (int i = 0; i < d.Worms; i++)
             {
+                Vector2Int cell;
+                if (homes.Count > 0) cell = homes[i % homes.Count];
+                else if (i < cells.Count) cell = cells[i];
+                else break;
                 var go = new GameObject("Worm");
                 go.transform.SetParent(transform, false);
-                go.AddComponent<Worm>().Init(this, cells[i], d.WormSpeed, rng.Next());
+                var worm = go.AddComponent<Worm>();
+                worm.Init(this, cell, d.WormSpeed, rng.Next());
+                slorms.Add(worm);
             }
         }
+
+        const float SlormReleaseGap = 4f;   // seconds between slorms leaving the pen
+        bool slormsReleased;
+
+        /// <summary>The player has entered this section: let its slorms out of the pen one at a time, Pac-Man style.</summary>
+        public void ReleaseSlorms()
+        {
+            if (slormsReleased) return;
+            slormsReleased = true;
+            for (int i = 0; i < slorms.Count; i++) slorms[i].ReleaseAt(Time.time + i * SlormReleaseGap);
+        }
+
+        /// <summary>All slorms in this section (including eaten ones waiting to respawn).</summary>
+        public IReadOnlyList<Worm> Slorms => slorms;
 
         public static GameObject Decor(PrimitiveType type, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
         {
@@ -653,22 +816,21 @@ namespace Slock
     /// <summary>How nasty chunk N is. Everything ramps up and then plateaus.</summary>
     public struct Difficulty
     {
-        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance, RampRoomChance;
+        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance;
         public int MinRooms, MaxRooms, Pickups, Worms;
 
         public static Difficulty For(int i) => new()
         {
             LoopChance = Mathf.Max(0.02f, 0.10f - i * 0.008f),
-            PitChance = Mathf.Min(0.5f, 0.15f + i * 0.03f),
+            PitChance = Mathf.Min(0.5f, 0.2f + i * 0.03f),
             OpenEdgeChance = Mathf.Min(0.95f, 0.4f + i * 0.06f),
-            MinRooms = 1,
-            MaxRooms = 3,
+            MinRooms = 2,
+            MaxRooms = 4,
             Pickups = 3 + Mathf.Min(3, i / 3),
-            Worms = Mathf.Min(6, 1 + (i + 1) / 2),
-            WormSpeed = Mathf.Min(5f, 2.2f + i * 0.15f),
+            Worms = 4 + i,                         // Pac-Man: 4 to start, one more per section
+            WormSpeed = Mathf.Min(9.6f, 4f + i * 0.3f),    // tiles/s
             TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
             EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
-            RampRoomChance = i == 0 ? 0f : 0.45f,
         };
     }
 }

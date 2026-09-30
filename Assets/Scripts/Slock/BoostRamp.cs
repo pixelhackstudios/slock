@@ -3,7 +3,8 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// A side-room ramp's booster: slide down it freely, but head back up and it launches the slock to the top.
+    /// A ramp booster: slide down freely, but head uphill and it launches the slock to the top.
+    /// Used on side-room return ramps and on the entry climb ramp past each gate.
     /// </summary>
     public class BoostRamp : MonoBehaviour
     {

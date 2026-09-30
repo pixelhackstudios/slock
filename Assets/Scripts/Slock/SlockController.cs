@@ -3,8 +3,8 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// The sliding block. Tilt acceleration from <see cref="TiltCameraRig"/> does the pushing; this keeps it locked
-    /// to the grid: it always travels along a row or column, corners Pac-Man style, and drops cleanly into holes.
+    /// The sliding block. The world's tilted gravity does all the pushing and surface friction is the only resistance;
+    /// it rides tile-centre rails, turns Pac-Man style, stays flush on ramps and drops cleanly into holes.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class SlockController : MonoBehaviour
@@ -12,28 +12,32 @@ namespace Slock
         /// <summary>Width of the block: always exactly one grid block of the section it's in.</summary>
         public float Size { get; private set; } = 1f;
         public float Height => Size * 1.1f;      // a hair taller than the walls (which are Size tall)
-        const float Clearance = 0.04f;           // physics box is a hair smaller (fraction of Size) so it never jams
+        const float Shrink = 0.01f;              // hull undersize vs a tile (1%): stops wedging, stays grid-true
+        // Compensation for this collider's flat-face contact patch: measured (coast test on a level floor), a sliding box here is
+        // slowed by exactly twice the material's friction coefficient (PhysX friction patches use multiple contact points).
+        // The material gets half of ControlSettings.Friction so that value is the real mu. Re-measure if the collider shape changes.
+        const float PhysxPatchFrictionCompensation = 0.5f;
+        // Creep: a soft, jelly-like resistance at low speed (strongest near rest, gone by CreepFadeSpeed). A gentle
+        // tilt settles into a steady creep that grows with the slope (a wide, human-sized band: ~0.2 tiles/s just
+        // past friction up to ~2 tiles/s); tilt past ~12 deg and it breaks free into a normal slide
+        // (breakaway accel = CreepDamping * CreepFadeSpeed / 4).
+        const float CreepDamping = 6f;           // per second, at rest
+        const float CreepFadeSpeed = 6f;         // tiles/s
         public float shrinkSpeed = 3f;           // size units per second when passing through a gate
 
         float targetSize = 1f;
         float gridTs = 1f, gridZ0;               // the grid we're locked to (current section)
-        BoxCollider box;
+        Transform hull;                          // the single convex collision body (a child so it can scale with the slock)
+        Collider hullCollider;
         Transform visual;
 
-        public float laneSpring = 70f;     // how hard the block is held on its grid line
-        public float laneDamping = 12f;
         public float holeSnap = 14f;       // how fast it lines up with a hole it's dropping into
-        public float turnBias = 1.15f;     // tilt must favour a new axis by this much before switching (no jitter on diagonals)
-
-        bool wantZ = true;
-        public float maxSpeed = 16f;
-        /// <summary>Sliding drag. Tilt sets the speed it settles at (tilt accel / drag): higher = tighter, slower top speed.</summary>
-        public float slideDrag = 1.8f;
         public float alignSpeed = 12f;
+        public float turnSnap = 14f;         // how fast it slides to a tile centre to take a turn
+        public float turnBias = 1.15f;       // tilt must favour the other axis by this much to turn (no jitter on diagonals)
+        bool travelZ = true;                 // rail it's on: true = runs along Z (X locked), false = runs along X (Z locked)
 
         public Rigidbody Body { get; private set; }
-        public TiltCameraRig TiltRig { private get; set; }
-        public bool OnRail { get; private set; }
         public bool Grounded { get; private set; }
 
         const int SelfLayer = 2; // "Ignore Raycast", so our own probes skip us
@@ -41,17 +45,24 @@ namespace Slock
         public static SlockController Create()
         {
             var go = new GameObject("Slock") { layer = SelfLayer };
-            var box = go.AddComponent<BoxCollider>();
-            box.material = new PhysicsMaterial("Slock Ice")
+
+            // One convex, rounded-corner collision hull (the low-poly jelly, slightly inset) so wall corners and
+            // ramp lips deflect the block instead of snagging it like a sharp box would.
+            var hullGo = new GameObject("Collider") { layer = SelfLayer };
+            hullGo.transform.SetParent(go.transform, false);
+            var hullCollider = hullGo.AddComponent<MeshCollider>();
+            hullCollider.convex = true;
+            hullCollider.material = new PhysicsMaterial("Slock")
             {
-                dynamicFriction = 0f,
-                staticFriction = 0f,
-                bounciness = 0.2f,
-                frictionCombine = PhysicsMaterialCombine.Minimum,
+                dynamicFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
+                staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
+                bounciness = 0f,
+                frictionCombine = PhysicsMaterialCombine.Minimum, // the slock's friction wins over the default 0.6 surfaces
                 bounceCombine = PhysicsMaterialCombine.Maximum,
             };
 
             // Jelly body: the rounded Blender cube if present (Resources/Slock/SlockJelly.fbx), else a plain cube.
+            var hullMesh = Resources.Load<Mesh>("Slock/SlockJellyLow") ?? Resources.Load<Mesh>("Slock/SlockJelly");
             var body = new GameObject("Jelly") { layer = SelfLayer };
             body.transform.SetParent(go.transform, false);
             var jellyMesh = Resources.Load<Mesh>("Slock/SlockJelly");
@@ -61,6 +72,7 @@ namespace Slock
                 jellyMesh = tmp.GetComponent<MeshFilter>().sharedMesh;
                 Destroy(tmp);
             }
+            hullCollider.sharedMesh = hullMesh != null ? hullMesh : jellyMesh; // the full jelly is over PhysX's convex limit
             body.AddComponent<MeshFilter>().sharedMesh = jellyMesh;
             body.AddComponent<MeshRenderer>().sharedMaterial = Visuals.SlockJelly;
             var jelly = body.AddComponent<JellyWobble>();
@@ -76,7 +88,8 @@ namespace Slock
 
 
             var s = go.AddComponent<SlockController>();
-            s.box = box;
+            s.hull = hullGo.transform;
+            s.hullCollider = hullCollider;
             s.visual = body.transform;
             s.SetSizeImmediate(1f);
             return s;
@@ -97,7 +110,8 @@ namespace Slock
         void ApplySize(float size)
         {
             Size = size;
-            box.size = new Vector3(size * (1f - Clearance), Height, size * (1f - Clearance));
+            float s = size * (1f - Shrink);
+            hull.localScale = new Vector3(s, Height, s);
             visual.localScale = new Vector3(size, Height, size);
         }
 
@@ -105,7 +119,7 @@ namespace Slock
         {
             Body = GetComponent<Rigidbody>();
             Body.mass = 1f;
-            Body.linearDamping = 0.05f; // sliding drag is applied horizontally in FixedUpdate so falls aren't slowed
+            Body.linearDamping = 0f;    // no hidden drag: surface friction is the only resistance
             Body.angularDamping = 5f;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
             Body.interpolation = RigidbodyInterpolation.Interpolate;
@@ -127,82 +141,133 @@ namespace Slock
             Body.AddForce(direction.normalized * speed + Vector3.up * 2f, ForceMode.VelocityChange);
         }
 
+        /// <summary>Bounce away from <paramref name="fromPosition"/> hard enough to slide about
+        /// <paramref name="tiles"/> grid blocks (3 by default), plus a small hop.</summary>
+        public void BounceBack(Vector3 fromPosition, float tiles = 3f)
+        {
+            var away = transform.position - fromPosition;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1e-6f)
+            {
+                away = Body.linearVelocity;
+                away.y = 0f;
+            }
+            if (away.sqrMagnitude < 1e-6f) away = Vector3.back;
+            away.Normalize();
+            // v = sqrt(2*a*d): friction is the only resistance, so this slides ~tiles blocks.
+            float a = Mathf.Max(0.5f, ControlSettings.Friction * ControlSettings.FallGravity);
+            float speed = Mathf.Sqrt(2f * a * tiles * Size);
+            speed = Mathf.Clamp(speed, 2.5f, 12f);
+            Body.linearVelocity = new Vector3(away.x * speed, Body.linearVelocity.y, away.z * speed);
+            Body.AddForce(Vector3.up * 2f, ForceMode.VelocityChange);
+        }
+
         void FixedUpdate()
         {
             if (!Mathf.Approximately(Size, targetSize))
                 ApplySize(Mathf.MoveTowards(Size, targetSize, shrinkSpeed * Time.fixedDeltaTime));
 
-            // Feel settings are live-tunable from the pause screen.
-            slideDrag = ControlSettings.SlideDrag;
-            maxSpeed = ControlSettings.MaxSpeed;
-            laneSpring = ControlSettings.LaneSpring;
-            laneDamping = 1.6f * Mathf.Sqrt(laneSpring);   // firm but not bouncy
             var p = Body.position;
-            float ts = gridTs;
-
             var v = Body.linearVelocity;
-            var tiltAcceleration = TiltRig != null ? TiltRig.TiltAcceleration : Vector3.zero;
+
+            // Surface friction (live-tunable from the pause screen); gravity does all the pushing.
+            var mat = hullCollider.sharedMaterial;
+            mat.staticFriction = mat.dynamicFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
 
             Grounded = Physics.Raycast(p, Vector3.down, out var hit, Height * 0.5f + 0.35f * Size, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            if (!Grounded && Physics.Raycast(p, Vector3.down, Height * 0.5f + 1.5f * Size, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                // Only briefly airborne (hopping off a ramp's lip, a bump): floor is right below, so this isn't a
+                // hole. Keep its speed and stay on its rail.
+                Body.constraints = RigidbodyConstraints.FreezeRotation |
+                    (travelZ ? RigidbodyConstraints.FreezePositionX : RigidbodyConstraints.FreezePositionZ);
+                return;
+            }
             if (!Grounded)
             {
                 // Centre is over a hole (or past an edge): line up with that grid square and drop straight
                 // through it, instead of catching a corner and wedging.
-                var target = new Vector3(Snap(p.x, ts), p.y, SnapZ(p.z));
+                var target = new Vector3(Snap(p.x, gridTs), p.y, SnapZ(p.z));
                 var pull = (target - p) * holeSnap;
                 Body.linearVelocity = new Vector3(pull.x, v.y, pull.z);
-                OnRail = true;
                 return;
             }
-
-            Body.AddForce(tiltAcceleration, ForceMode.Acceleration);
-
-            // Speed follows tilt: drag balances the tilt's pull, so a small tilt creeps and a full tilt races,
-            // and levelling the board brings the block to a stop in about half a second.
-            Body.AddForce(new Vector3(-v.x, 0f, -v.z) * slideDrag, ForceMode.Acceleration);
 
             // Stay flush with ramps.
             var targetRot = Quaternion.FromToRotation(Vector3.up, hit.normal);
             Body.MoveRotation(Quaternion.Slerp(Body.rotation, targetRot, alignSpeed * Time.fixedDeltaTime));
 
-            // Grid lock: the block always travels along a row or column, like Pac-Man. Tilting toward a wall
-            // while sliding keeps it sliding along its row, and it turns into the first opening that way.
-            float gx = Mathf.Abs(tiltAcceleration.x), gz = Mathf.Abs(tiltAcceleration.z);
-            if (gz > gx * turnBias) wantZ = true;
-            else if (gx > gz * turnBias) wantZ = false;
-            bool tilted = Mathf.Max(gx, gz) > 0.8f;
-            bool movingZ = Mathf.Abs(v.z) >= Mathf.Abs(v.x);
-            bool sliding = new Vector2(v.x, v.z).magnitude > 0.3f;
+            // Rails: the bottom centre is locked to the tile-centre line across the corridor (a real physics
+            // constraint, so gravity and friction along the corridor stay exact). It turns Pac-Man style: when
+            // the tilt favours the other axis and that way is open from the nearest tile centre, it slides to
+            // that centre and switches rails.
+            var g = Physics.gravity;
+            bool wantZ = travelZ;
+            if (Mathf.Abs(g.z) > Mathf.Abs(g.x) * turnBias) wantZ = true;
+            else if (Mathf.Abs(g.x) > Mathf.Abs(g.z) * turnBias) wantZ = false;
 
-            bool travelZ;
-            if (!tilted) travelZ = sliding ? movingZ : wantZ;
-            else
+            float along = travelZ ? p.z : p.x;
+            float alongCentre = travelZ ? SnapZ(p.z) : Snap(p.x, gridTs);
+            if (wantZ != travelZ)
             {
-                var want = wantZ ? new Vector3(0, 0, Mathf.Sign(tiltAcceleration.z)) : new Vector3(Mathf.Sign(tiltAcceleration.x), 0, 0);
-                bool blocked = Probe(p, want, ts * 0.7f);
-                travelZ = blocked && sliding && movingZ != wantZ ? movingZ : wantZ;
+                var centrePos = travelZ ? new Vector3(p.x, p.y, alongCentre) : new Vector3(alongCentre, p.y, p.z);
+                var dir = wantZ ? new Vector3(0f, 0f, Mathf.Sign(g.z)) : new Vector3(Mathf.Sign(g.x), 0f, 0f);
+                if (!Probe(centrePos, dir, gridTs * 0.7f))
+                {
+                    if (Mathf.Abs(alongCentre - along) < 0.02f * gridTs)
+                    {
+                        // At the centre: switch rails. Momentum along the old rail stops at the corner.
+                        travelZ = wantZ;
+                        p = centrePos;
+                        Body.position = p;
+                        v = travelZ ? new Vector3(0f, v.y, v.z) : new Vector3(v.x, v.y, 0f);
+                        Body.linearVelocity = v;
+                    }
+                    else
+                    {
+                        float pull = (alongCentre - along) * turnSnap;
+                        v = travelZ ? new Vector3(v.x, v.y, pull) : new Vector3(pull, v.y, v.z);
+                        Body.linearVelocity = v;
+                    }
+                }
             }
 
-            // Hold the other axis on the grid line, cancelling tilt's sideways pull so it sits exactly on it.
-            var lockAxis = travelZ ? Vector3.right : Vector3.forward;
-            float c = Vector3.Dot(p, lockAxis);
-            float d = (travelZ ? Snap(c, ts) : SnapZ(c)) - c;
-            Body.AddForce(lockAxis * (d * laneSpring - Vector3.Dot(v, lockAxis) * laneDamping - Vector3.Dot(tiltAcceleration, lockAxis)), ForceMode.Acceleration);
-            OnRail = true;
-
-            var flat = new Vector3(v.x, 0, v.z);
-            if (flat.magnitude > maxSpeed)
+            // Hold the cross axis exactly on the tile-centre line.
+            if (travelZ)
             {
-                flat = flat.normalized * maxSpeed;
+                float x = Snap(p.x, gridTs);
+                if (!Mathf.Approximately(p.x, x)) Body.position = new Vector3(x, p.y, p.z);
+                Body.linearVelocity = new Vector3(0f, v.y, v.z);
+                Body.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionX;
+            }
+            else
+            {
+                float z = SnapZ(p.z);
+                if (!Mathf.Approximately(p.z, z)) Body.position = new Vector3(p.x, p.y, z);
+                Body.linearVelocity = new Vector3(v.x, v.y, 0f);
+                Body.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionZ;
+            }
+            v = Body.linearVelocity;
+            var flat = new Vector3(v.x, 0, v.z);
+
+            // Creep (see CreepDamping): soft resistance that fades out as it speeds up.
+            float sp = flat.magnitude, fade = CreepFadeSpeed * gridTs;
+            if (sp > 1e-4f && sp < fade)
+                Body.AddForce(-flat * (CreepDamping * (1f - sp / fade)), ForceMode.Acceleration);
+
+            // Safety limit only (keeps fast falls from tunnelling); not part of the feel.
+            if (flat.magnitude > ControlSettings.MaxSpeed)
+            {
+                flat = flat.normalized * ControlSettings.MaxSpeed;
                 Body.linearVelocity = new Vector3(flat.x, v.y, flat.z);
             }
         }
 
         static float Snap(float v, float ts) => Mathf.Round(v / ts) * ts;
-        float SnapZ(float z) => gridZ0 + Mathf.Round((z - gridZ0) / gridTs) * gridTs;
 
         static bool Probe(Vector3 from, Vector3 dir, float dist) =>
             Physics.Raycast(from, dir, dist, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        float SnapZ(float z) => gridZ0 + Mathf.Round((z - gridZ0) / gridTs) * gridTs;
     }
 }

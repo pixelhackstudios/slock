@@ -5,7 +5,7 @@ namespace Slock
     /// <summary>Runtime-generated textures and materials, so the game needs no authored assets yet.</summary>
     public static class Visuals
     {
-        public static Material FloorTop, WallTop, WallSide, SlockBody, SlockJelly, SlockCore, WormJelly, WormScared, WormFlash, Pickup, Pellet, GoldPellet, Clock, Key, Boost, Checkpoint, Gate;
+        public static Material FloorTop, WallTop, WallSide, SlockBody, SlockJelly, SlockCore, WormJelly, WormScared, WormFlash, Pickup, Pellet, GoldPellet, Clock, Key, Boost, Checkpoint, Gate, AimMark;
 
         public static void Init()
         {
@@ -20,6 +20,7 @@ namespace Slock
             SlockBody = Make(null, new Color(0.95f, 0.10f, 0.16f), 0.85f, new Color(0.55f, 0.02f, 0.05f));
             SlockJelly = MakeJelly(new Color(0.85f, 0.0f, 0.06f, 0.72f), new Color(0.45f, 0.0f, 0.03f));
             SlockCore = Make(null, new Color(0.45f, 0.0f, 0.04f), 0.6f, new Color(0.5f, 0.0f, 0.05f));
+            AimMark = MakeJelly(new Color(1f, 0.08f, 0.08f, 0.45f), new Color(0.7f, 0.0f, 0.0f)); // slug aim highlight
             // Slorms: solid, glossy blocks (they still wobble like jelly).
             WormJelly = Make(null, new Color(0.2f, 0.75f, 0.12f), 0.8f, new Color(0.02f, 0.18f, 0.0f));
             WormScared = Make(null, new Color(0.15f, 0.3f, 1f), 0.8f, new Color(0.02f, 0.08f, 0.5f));

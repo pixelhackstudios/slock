@@ -36,3 +36,7 @@ __pycache__/
 
 # Source-art zip downloads (the extracted folders are kept)
 /art-work/*.zip
+
+# Unity crash dumps and stray build output
+mono_crash.*
+/Data/

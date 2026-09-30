@@ -7,8 +7,8 @@ namespace Slock
     /// A slorm: a green block worm that inches through the maze like a telescope: the slock-sized head slides one block
     /// and pauses, and each smaller block behind eases toward the one in front of it, tucking in behind (and
     /// inside) the head; when the head moves on, the tail stretches back out. Nothing rotates: the blocks stay
-    /// square to the grid. Touching it knocks the slock away and costs time, unless a power gem is active,
-    /// in which case it gets eaten.
+    /// square to the grid. The head is solid jelly: the slock cannot pass through it. Touching it bounces the slock
+    /// back and costs time, unless a power gem is active, in which case the head goes soft (trigger) and gets eaten.
     /// </summary>
     public class Worm : MonoBehaviour
     {
@@ -26,10 +26,13 @@ namespace Slock
         readonly List<Vector2Int> options = new(4);
         bool eaten;
         float respawnAt;
+        float releaseAt = float.MaxValue;   // waits at home in the pen until its section releases it
         int look = -1;
         SphereCollider col;
 
         public bool Eaten => eaten;
+        /// <summary>Total time this slorm has taken from the player and still owes back on being eaten.</summary>
+        public float stolenTime;
 
         public void Init(MazeChunk c, Vector2Int start, float tilesPerSecond, int seed)
         {
@@ -40,12 +43,13 @@ namespace Slock
             from = to = home = start;
             rng = new System.Random(seed);
 
-            // Physics lives on the root (kinematic trigger that moves with the head).
+            // Physics lives on the root (kinematic body that moves with the head).
+            // Solid jelly when dangerous (slock bounces off); a soft trigger when edible so it can be eaten.
             transform.position = Pos(start);
             var rb = gameObject.AddComponent<Rigidbody>();
             rb.isKinematic = true;
             col = gameObject.AddComponent<SphereCollider>();
-            col.isTrigger = true;
+            col.isTrigger = false;
             col.radius = size * 0.45f;
 
             AddBlock(transform, 1f, "Head");
@@ -78,6 +82,9 @@ namespace Slock
 
         Vector3 Pos(Vector2Int cell) => chunk.TileCenter(cell.x, cell.y) + Vector3.up * height * 0.5f;
 
+        /// <summary>Leave the pen at <paramref name="time"/> (until then it sits at home).</summary>
+        public void ReleaseAt(float time) => releaseAt = time;
+
         /// <summary>Eaten during power mode: vanish, then crawl back out from home later.</summary>
         public void GetEaten(float respawnDelay)
         {
@@ -90,12 +97,14 @@ namespace Slock
         void Respawn()
         {
             eaten = false;
+            stolenTime = 0f;
             from = to = home;
             t = 0f;
             transform.position = Pos(home);
             for (int i = 0; i < body.Count; i++) body[i].position = FloorPoint(transform.position, SegmentScale[i]);
             col.enabled = true;
             foreach (var r in allRenderers) r.enabled = true;
+            look = -1; // force UpdateLook to re-pick material + solidity on the next frame
             PickNext();
         }
 
@@ -109,6 +118,9 @@ namespace Slock
             look = want;
             var mat = want switch { 1 => Visuals.WormScared, 2 => Visuals.WormFlash, _ => Visuals.WormJelly };
             foreach (var r in jellies) r.sharedMaterial = mat;
+            // Edible (power mode): soft trigger so the slock passes in and eats it.
+            // Otherwise: solid jelly that the slock collides with and bounces off.
+            if (col != null && !eaten) col.isTrigger = want > 0;
         }
 
         void PickNext()
@@ -133,6 +145,7 @@ namespace Slock
                 else return;
             }
             UpdateLook();
+            if (Time.time < releaseAt) return; // still waiting in the pen
 
             // Head: slide one block (eased), pause, repeat. Frightened worms are slow.
             t += Time.deltaTime / stepTime * (look > 0 ? 0.55f : 1f);
@@ -157,6 +170,12 @@ namespace Slock
         void OnTriggerEnter(Collider other)
         {
             var slock = other.GetComponentInParent<SlockController>();
+            if (slock != null) GameManager.I?.OnWormHit(this, slock);
+        }
+
+        void OnCollisionEnter(Collision other)
+        {
+            var slock = other.collider.GetComponentInParent<SlockController>();
             if (slock != null) GameManager.I?.OnWormHit(this, slock);
         }
     }

@@ -4,9 +4,9 @@ using UnityEngine;
 
 /// <summary>
 /// One-click / command-line builds. From a terminal (with the editor closed):
-///   Unity -batchmode -quit -projectPath . -executeMethod SlockBuild.Linux
+///   Unity -batchmode -quit -projectPath . -executeMethod SlockBuild.Linux   (or .Windows, .Mac, .All)
 ///   Unity -batchmode -quit -projectPath . -executeMethod SlockBuild.EnsureAssets
-/// Or in the editor: menu Slock > Build Linux.
+/// Or in the editor: menu Slock > Build Linux / Windows / Mac / All. Output goes to Builds/&lt;platform&gt;/.
 /// </summary>
 public static class SlockBuild
 {
@@ -134,18 +134,45 @@ public static class SlockBuild
     }
 
     [MenuItem("Slock/Build Linux")]
-    public static void Linux()
+    public static void Linux() => Finish(Build(BuildTarget.StandaloneLinux64, "Builds/Linux/Slock.x86_64"));
+
+    [MenuItem("Slock/Build Windows")]
+    public static void Windows() => Finish(Build(BuildTarget.StandaloneWindows64, "Builds/Windows/Slock.exe"));
+
+    [MenuItem("Slock/Build Mac")]
+    public static void Mac() => Finish(Build(BuildTarget.StandaloneOSX, "Builds/Mac/Slock.app"));
+
+    [MenuItem("Slock/Build All")]
+    public static void All()
     {
+        bool ok = Build(BuildTarget.StandaloneLinux64, "Builds/Linux/Slock.x86_64");
+        ok &= Build(BuildTarget.StandaloneWindows64, "Builds/Windows/Slock.exe");
+        ok &= Build(BuildTarget.StandaloneOSX, "Builds/Mac/Slock.app");
+        Finish(ok);
+    }
+
+    static bool Build(BuildTarget target, string path)
+    {
+        if (!BuildPipeline.IsBuildTargetSupported(BuildPipeline.GetBuildTargetGroup(target), target))
+        {
+            Debug.LogError($"Slock {target} build: that platform's Build Support module isn't installed (Unity Hub > Installs > Add modules).");
+            return false;
+        }
         EnsureAssets();
         EnsureTileMaterials();
         var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
         {
             scenes = new[] { "Assets/Scenes/SampleScene.unity" },
-            locationPathName = "Builds/Linux/Slock.x86_64",
-            target = BuildTarget.StandaloneLinux64,
+            locationPathName = path,
+            target = target,
             options = BuildOptions.None,
         });
-        Debug.Log($"Slock Linux build: {report.summary.result}, {report.summary.totalSize / (1024 * 1024)} MB");
-        if (Application.isBatchMode) EditorApplication.Exit(report.summary.result == BuildResult.Succeeded ? 0 : 1);
+        Debug.Log($"Slock {target} build: {report.summary.result}, {report.summary.totalSize / (1024 * 1024)} MB -> {path}");
+        return report.summary.result == BuildResult.Succeeded;
+    }
+
+    static void Finish(bool ok)
+    {
+        if (Application.isBatchMode) EditorApplication.Exit(ok ? 0 : 1);
     }
 }
