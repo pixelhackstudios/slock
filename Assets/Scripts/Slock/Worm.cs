@@ -26,6 +26,7 @@ namespace Slock
         readonly List<Vector2Int> options = new(4);
         bool eaten;
         float respawnAt;
+        float releaseAt = float.MaxValue;   // waits at home in the pen until its section releases it
         int look = -1;
         SphereCollider col;
 
@@ -80,6 +81,9 @@ namespace Slock
         Vector3 FloorPoint(Vector3 p, float scale) => new(p.x, chunk.FloorY + height * scale * 0.5f, p.z);
 
         Vector3 Pos(Vector2Int cell) => chunk.TileCenter(cell.x, cell.y) + Vector3.up * height * 0.5f;
+
+        /// <summary>Leave the pen at <paramref name="time"/> (until then it sits at home).</summary>
+        public void ReleaseAt(float time) => releaseAt = time;
 
         /// <summary>Eaten during power mode: vanish, then crawl back out from home later.</summary>
         public void GetEaten(float respawnDelay)
@@ -141,6 +145,7 @@ namespace Slock
                 else return;
             }
             UpdateLook();
+            if (Time.time < releaseAt) return; // still waiting in the pen
 
             // Head: slide one block (eased), pause, repeat. Frightened worms are slow.
             t += Time.deltaTime / stepTime * (look > 0 ? 0.55f : 1f);

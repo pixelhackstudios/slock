@@ -19,8 +19,22 @@ public static class SlockResponseProbe
     static EnterPlayModeOptions savedOptions;
     static bool savedEnabled;
 
+    static System.Type behaviour = typeof(SlockResponseProbeBehaviour);
+
+    public static void RunWith(System.Type probe)
+    {
+        behaviour = probe;
+        Start();
+    }
+
     [MenuItem("Slock/Run Response Probe")]
     public static void Run()
+    {
+        behaviour = typeof(SlockResponseProbeBehaviour);
+        Start();
+    }
+
+    static void Start()
     {
         savedEnabled = EditorSettings.enterPlayModeOptionsEnabled;
         savedOptions = EditorSettings.enterPlayModeOptions;
@@ -33,16 +47,26 @@ public static class SlockResponseProbe
     static void OnState(PlayModeStateChange s)
     {
         if (s == PlayModeStateChange.EnteredPlayMode)
-            new GameObject("Probe").AddComponent<SlockResponseProbeBehaviour>();
+        {
+            var go = new GameObject("Probe");
+            if (behaviour == typeof(SlockCornerProbeBehaviour)) go.AddComponent<SlockCornerProbeBehaviour>();
+            else go.AddComponent<SlockResponseProbeBehaviour>();
+        }
+        else if (s == PlayModeStateChange.EnteredEditMode) Restore();   // also covers stopping Play mode by hand
     }
 
-    public static void Finish()
+    static void Restore()
     {
         EditorApplication.playModeStateChanged -= OnState;
         EditorSettings.enterPlayModeOptionsEnabled = savedEnabled;
         EditorSettings.enterPlayModeOptions = savedOptions;
-        if (Application.isBatchMode) EditorApplication.Exit(0);
-        else EditorApplication.ExitPlaymode();
+    }
+
+    /// <summary>Headless: quit. In the editor: stay in Play mode so the results stay on screen; settings are
+    /// restored when you stop Play mode.</summary>
+    public static void Finish()
+    {
+        if (Application.isBatchMode) { Restore(); EditorApplication.Exit(0); }
     }
 }
 
@@ -73,6 +97,8 @@ public class SlockResponseProbeBehaviour : MonoBehaviour
         var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
         floor.transform.position = new Vector3(OriginX, -0.5f, 0f);
         floor.transform.localScale = new Vector3(200f, 1f, 400f);
+        var magnet = typeof(SlockController).GetField("magnetStiffness");   // measure physics alone
+        if (magnet != null) { Debug.Log($"[probe] grid magnet switched OFF (was {magnet.GetValue(slock)})"); magnet.SetValue(slock, 0f); }
 
         float y = rig.yaw * Mathf.Deg2Rad;
         var flatFwd = new Vector2(Mathf.Sin(y), Mathf.Cos(y));

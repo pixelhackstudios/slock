@@ -4,7 +4,7 @@ namespace Slock
 {
     /// <summary>
     /// The sliding block. The world's tilted gravity does all the pushing and surface friction is the only resistance;
-    /// this just keeps it flush on ramps and drops it cleanly into holes.
+    /// it rides tile-centre rails, turns Pac-Man style, stays flush on ramps and drops cleanly into holes.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class SlockController : MonoBehaviour
@@ -12,11 +12,17 @@ namespace Slock
         /// <summary>Width of the block: always exactly one grid block of the section it's in.</summary>
         public float Size { get; private set; } = 1f;
         public float Height => Size * 1.1f;      // a hair taller than the walls (which are Size tall)
-        const float Clearance = 0.04f;           // physics hull is a hair smaller (fraction of Size) so it never jams
+        const float Shrink = 0.01f;              // hull undersize vs a tile (1%): stops wedging, stays grid-true
         // Compensation for this collider's flat-face contact patch: measured (SlockResponseProbe), a sliding box here is
         // slowed by exactly twice the material's friction coefficient (PhysX friction patches use multiple contact points).
         // The material gets half of ControlSettings.Friction so that value is the real mu. Re-measure if the collider shape changes.
         const float PhysxPatchFrictionCompensation = 0.5f;
+        // Creep: a soft, jelly-like resistance at low speed (strongest near rest, gone by CreepFadeSpeed). A gentle
+        // tilt settles into a steady creep that grows with the slope (a wide, human-sized band: ~0.2 tiles/s just
+        // past friction up to ~2 tiles/s); tilt past ~12 deg and it breaks free into a normal slide
+        // (breakaway accel = CreepDamping * CreepFadeSpeed / 4).
+        const float CreepDamping = 6f;           // per second, at rest
+        const float CreepFadeSpeed = 6f;         // tiles/s
         public float shrinkSpeed = 3f;           // size units per second when passing through a gate
 
         float targetSize = 1f;
@@ -27,6 +33,9 @@ namespace Slock
 
         public float holeSnap = 14f;       // how fast it lines up with a hole it's dropping into
         public float alignSpeed = 12f;
+        public float turnSnap = 14f;         // how fast it slides to a tile centre to take a turn
+        public float turnBias = 1.15f;       // tilt must favour the other axis by this much to turn (no jitter on diagonals)
+        bool travelZ = true;                 // rail it's on: true = runs along Z (X locked), false = runs along X (Z locked)
 
         public Rigidbody Body { get; private set; }
         public bool Grounded { get; private set; }
@@ -47,7 +56,7 @@ namespace Slock
             {
                 dynamicFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
                 staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation,
-                bounciness = 0.2f,
+                bounciness = 0f,
                 frictionCombine = PhysicsMaterialCombine.Minimum, // the slock's friction wins over the default 0.6 surfaces
                 bounceCombine = PhysicsMaterialCombine.Maximum,
             };
@@ -101,7 +110,8 @@ namespace Slock
         void ApplySize(float size)
         {
             Size = size;
-            hull.localScale = new Vector3(size * (1f - Clearance), Height, size * (1f - Clearance));
+            float s = size * (1f - Shrink);
+            hull.localScale = new Vector3(s, Height, s);
             visual.localScale = new Vector3(size, Height, size);
         }
 
@@ -157,13 +167,23 @@ namespace Slock
             if (!Mathf.Approximately(Size, targetSize))
                 ApplySize(Mathf.MoveTowards(Size, targetSize, shrinkSpeed * Time.fixedDeltaTime));
 
-            // Live-tunable from the pause screen. Friction is the only resistance: gravity does all the pushing.
-            hullCollider.sharedMaterial.dynamicFriction = hullCollider.sharedMaterial.staticFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation;
             var p = Body.position;
             var v = Body.linearVelocity;
+
+            // Surface friction (live-tunable from the pause screen); gravity does all the pushing.
+            var mat = hullCollider.sharedMaterial;
+            mat.staticFriction = mat.dynamicFriction = ControlSettings.Friction * PhysxPatchFrictionCompensation;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
 
             Grounded = Physics.Raycast(p, Vector3.down, out var hit, Height * 0.5f + 0.35f * Size, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            if (!Grounded && Physics.Raycast(p, Vector3.down, Height * 0.5f + 1.5f * Size, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                // Only briefly airborne (hopping off a ramp's lip, a bump): floor is right below, so this isn't a
+                // hole. Keep its speed and stay on its rail.
+                Body.constraints = RigidbodyConstraints.FreezeRotation |
+                    (travelZ ? RigidbodyConstraints.FreezePositionX : RigidbodyConstraints.FreezePositionZ);
+                return;
+            }
             if (!Grounded)
             {
                 // Centre is over a hole (or past an edge): line up with that grid square and drop straight
@@ -178,8 +198,65 @@ namespace Slock
             var targetRot = Quaternion.FromToRotation(Vector3.up, hit.normal);
             Body.MoveRotation(Quaternion.Slerp(Body.rotation, targetRot, alignSpeed * Time.fixedDeltaTime));
 
-            // Safety limit only (keeps fast falls from tunnelling); not part of the feel.
+            // Rails: the bottom centre is locked to the tile-centre line across the corridor (a real physics
+            // constraint, so gravity and friction along the corridor stay exact). It turns Pac-Man style: when
+            // the tilt favours the other axis and that way is open from the nearest tile centre, it slides to
+            // that centre and switches rails.
+            var g = Physics.gravity;
+            bool wantZ = travelZ;
+            if (Mathf.Abs(g.z) > Mathf.Abs(g.x) * turnBias) wantZ = true;
+            else if (Mathf.Abs(g.x) > Mathf.Abs(g.z) * turnBias) wantZ = false;
+
+            float along = travelZ ? p.z : p.x;
+            float alongCentre = travelZ ? SnapZ(p.z) : Snap(p.x, gridTs);
+            if (wantZ != travelZ)
+            {
+                var centrePos = travelZ ? new Vector3(p.x, p.y, alongCentre) : new Vector3(alongCentre, p.y, p.z);
+                var dir = wantZ ? new Vector3(0f, 0f, Mathf.Sign(g.z)) : new Vector3(Mathf.Sign(g.x), 0f, 0f);
+                if (!Probe(centrePos, dir, gridTs * 0.7f))
+                {
+                    if (Mathf.Abs(alongCentre - along) < 0.02f * gridTs)
+                    {
+                        // At the centre: switch rails. Momentum along the old rail stops at the corner.
+                        travelZ = wantZ;
+                        p = centrePos;
+                        Body.position = p;
+                        v = travelZ ? new Vector3(0f, v.y, v.z) : new Vector3(v.x, v.y, 0f);
+                        Body.linearVelocity = v;
+                    }
+                    else
+                    {
+                        float pull = (alongCentre - along) * turnSnap;
+                        v = travelZ ? new Vector3(v.x, v.y, pull) : new Vector3(pull, v.y, v.z);
+                        Body.linearVelocity = v;
+                    }
+                }
+            }
+
+            // Hold the cross axis exactly on the tile-centre line.
+            if (travelZ)
+            {
+                float x = Snap(p.x, gridTs);
+                if (!Mathf.Approximately(p.x, x)) Body.position = new Vector3(x, p.y, p.z);
+                Body.linearVelocity = new Vector3(0f, v.y, v.z);
+                Body.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionX;
+            }
+            else
+            {
+                float z = SnapZ(p.z);
+                if (!Mathf.Approximately(p.z, z)) Body.position = new Vector3(p.x, p.y, z);
+                Body.linearVelocity = new Vector3(v.x, v.y, 0f);
+                Body.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionZ;
+            }
+            v = Body.linearVelocity;
             var flat = new Vector3(v.x, 0, v.z);
+
+            // Creep (see CreepDamping): soft resistance that fades out as it speeds up.
+            float sp = flat.magnitude, fade = CreepFadeSpeed * gridTs;
+            if (sp > 1e-4f && sp < fade)
+                Body.AddForce(-flat * (CreepDamping * (1f - sp / fade)), ForceMode.Acceleration);
+
+            // Safety limit only (keeps fast falls from tunnelling); not part of the feel.
             if (flat.magnitude > ControlSettings.MaxSpeed)
             {
                 flat = flat.normalized * ControlSettings.MaxSpeed;
@@ -188,6 +265,9 @@ namespace Slock
         }
 
         static float Snap(float v, float ts) => Mathf.Round(v / ts) * ts;
+
+        static bool Probe(Vector3 from, Vector3 dir, float dist) =>
+            Physics.Raycast(from, dir, dist, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         float SnapZ(float z) => gridZ0 + Mathf.Round((z - gridZ0) / gridTs) * gridTs;
     }
 }

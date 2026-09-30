@@ -16,8 +16,8 @@ namespace Slock
 
         const float StartTime = 35f;
         const float PickupTime = 5f;
-        const float PowerDuration = 7f;
-        const float PelletTime = 1f;
+        const float PowerDuration = 10f;
+        const float PelletTime = 1f, GoldPelletTime = 2f;
         const float WormTime = 10f;
         const int PelletPoints = 10, GoldPelletPoints = 30;
         const float ClockTime = 20f;
@@ -35,8 +35,13 @@ namespace Slock
         float timeLeft, runSeconds, maxZ, flash;
         int bonusScore, height, pickups, pelletsEaten, wormsEaten, wormChain, pelletsHere;
         float powerUntil;
-        int slugs;                          // emergency shots: 1 per run, breaks one wall or kills one slorm
+        int slugs;                          // emergency shots: break one inner wall or kill one slorm
+        int slugAllowance;                  // refilled at each gate, one more each time: 3, 4, 5...
+        int sealedUpTo = -1;                // sections whose exit has been walled up behind the player
         Vector2Int lastAim = new(0, 1);     // last tilt cardinal (N = +Z); default north
+        bool aiming;                        // slug aim mode: the game is frozen, tilt picks the target, click fires
+        GameObject aimMark;                 // translucent red block over the one thing the slug would hit
+        const int SlugRangeTiles = 4;
         float runStartUnscaled;
 
         public bool PowerActive => state == State.Playing && Time.time < powerUntil;
@@ -77,6 +82,7 @@ namespace Slock
             if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-slockdiag") >= 0)
                 StartCoroutine(Diagnose());
             PhotoMode.StartIfRequested(this);
+            AutoPlay.StartIfRequested(this);
         }
 
         /// <summary>
@@ -154,6 +160,7 @@ namespace Slock
         {
             foreach (var c in chunks.Values) Destroy(c.gameObject);
             chunks.Clear();
+            sealedUpTo = -1;
             seed = Random.Range(1, int.MaxValue / 8);
             StreamChunks(0);
 
@@ -166,7 +173,7 @@ namespace Slock
             runSeconds = maxZ = 0f;
             bonusScore = height = pickups = pelletsEaten = wormsEaten = wormChain = pelletsHere = 0;
             powerUntil = 0f;
-            slugs = 1;
+            slugs = slugAllowance = 3;
             lastAim = new Vector2Int(0, 1);
             popups.Clear();
         }
@@ -182,10 +189,12 @@ namespace Slock
 
         void StartRun()
         {
+            aiming = false;
+            if (aimMark != null) aimMark.SetActive(false);
             NewWorld();
             state = State.Playing;
             rig.inputEnabled = true;
-            rig.ResetStick();
+            rig.ResetTrackball();
             CaptureMouse(true);
             Time.timeScale = 1f;
             runStartUnscaled = Time.unscaledTime;
@@ -205,17 +214,16 @@ namespace Slock
         void SetPaused(bool paused)
         {
             state = paused ? State.Paused : State.Playing;
-            Time.timeScale = paused ? 0f : 1f;
+            Time.timeScale = paused || aiming ? 0f : 1f;
             rig.inputEnabled = !paused;
             CaptureMouse(!paused);
         }
 
-        /// <summary>While playing, trackball mode hides and locks the cursor; absolute mode keeps it in the window.</summary>
+        /// <summary>While playing, the cursor is hidden and locked (mouse movement tilts the world).</summary>
         static void CaptureMouse(bool playing)
         {
-            Cursor.lockState = !playing ? CursorLockMode.None
-                : ControlSettings.Trackball ? CursorLockMode.Locked : CursorLockMode.Confined;
-            Cursor.visible = !(playing && ControlSettings.Trackball);
+            Cursor.lockState = playing ? CursorLockMode.Locked : CursorLockMode.None;
+            Cursor.visible = !playing;
         }
 
         void StreamChunks(int current)
@@ -249,7 +257,8 @@ namespace Slock
                 case State.Playing:
                     if (esc) { SetPaused(true); break; }
                     if (kb != null && kb.rKey.wasPressedThisFrame) { StartRun(); break; }
-                    if (click && Time.unscaledTime - runStartUnscaled > 0.5f) TryFireSlug();
+                    if (click && Time.unscaledTime - runStartUnscaled > 0.5f) OnFireClick();
+                    if (aiming) UpdateAim();
                     TickRun();
                     break;
 
@@ -284,7 +293,18 @@ namespace Slock
             maxZ = Mathf.Max(maxZ, p.z);
             int current = Mathf.Max(0, MazeChunk.IndexAt(p.z));
             StreamChunks(current);
-            if (chunks.TryGetValue(current, out var here)) slock.SetGrid(here.TileSize, here.Z0);
+            if (chunks.TryGetValue(current, out var here))
+            {
+                slock.SetGrid(here.TileSize, here.Z0);
+                here.ReleaseSlorms();
+            }
+            // Once the slock is fully out of the previous section's exit, wall it up: no going back.
+            if (current > 0 && sealedUpTo < current - 1 && p.z - slock.Size * 0.5f > MazeChunk.StartZOf(current)
+                && chunks.TryGetValue(current - 1, out var previous))
+            {
+                previous.SealExit();
+                sealedUpTo = current - 1;
+            }
             EatPellets(p, current);
 
             float floor = MazeChunk.FloorYOf(current);
@@ -299,7 +319,7 @@ namespace Slock
             {
                 pelletsEaten++;
                 bonusScore += gold ? GoldPelletPoints : PelletPoints;
-                timeLeft += PelletTime;
+                timeLeft += gold ? GoldPelletTime : PelletTime;
                 if (chunk.PelletsLeft == 0 && !chunk.GateOpen)
                 {
                     chunk.OpenGate();
@@ -344,6 +364,10 @@ namespace Slock
             height = Mathf.Max(height, chunkIndex + 1);
             bonusScore += 250 * (chunkIndex + 1);
             timeLeft += d.TimeBonus;
+            // Through the gate: your slug back, plus one more.
+            slugAllowance++;
+            slugs = slugAllowance;
+            Popup($"SLUGS x{slugs}", new Color(1f, 0.85f, 0.3f), 1.6f);
             // Resolution up: the next section's blocks are smaller, and so is the slock.
             int block = MazeChunk.BlockOf(chunkIndex + 1);
             float size = MazeChunk.TileSizeOf(chunkIndex + 1);
@@ -386,26 +410,81 @@ namespace Slock
         void Popup(string text, Color color, float seconds) =>
             popups.Add((text, Time.unscaledTime + seconds, color));
 
-        /// <summary>Emergency slug (left click): one shot per run. Flies the tilt's cardinal (N/E/S/W),
-        /// killing the first slorm it touches or blasting one wall block open.</summary>
-        void TryFireSlug()
+        /// <summary>Emergency slug. First click: the game freezes and enters aim mode (no backing out: the slug is
+        /// committed). Tilting the board picks a cardinal (N/E/S/W, the way it slopes); the one thing the slug
+        /// would hit within <see cref="SlugRangeTiles"/> glows translucent red. Second click fires and play resumes.</summary>
+        void OnFireClick()
         {
             if (state != State.Playing || slock == null || rig == null) return;
+            if (aiming) { FireSlug(); return; }
             if (slugs <= 0) { Popup("NO SLUG", Color.gray, 0.8f); return; }
+            aiming = true;
+            Time.timeScale = 0f;
+            UpdateAim();
+        }
 
-            var t = rig.Tilt;
-            Vector2Int step;
-            if (t.magnitude >= 0.25f)
+        void UpdateAim()
+        {
+            // Downhill cardinal of the board's current tilt: the same gravity the slock feels.
+            var g = Physics.gravity;
+            if (rig.Tilt.magnitude >= 0.25f)
+                lastAim = Mathf.Abs(g.x) > Mathf.Abs(g.z)
+                    ? new Vector2Int(g.x > 0f ? 1 : -1, 0)
+                    : new Vector2Int(0, g.z > 0f ? 1 : -1);
+
+            if (aimMark == null)
             {
-                step = Mathf.Abs(t.x) > Mathf.Abs(t.y)
-                    ? new Vector2Int(t.x > 0f ? 1 : -1, 0)
-                    : new Vector2Int(0, t.y > 0f ? 1 : -1);
-                lastAim = step;
+                aimMark = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                aimMark.name = "Slug Aim";
+                Destroy(aimMark.GetComponent<Collider>());
+                aimMark.GetComponent<MeshRenderer>().sharedMaterial = Visuals.AimMark;
             }
-            else step = lastAim;
-            var dir = new Vector3(step.x, 0f, step.y);
+            bool found = FindSlugTarget(lastAim, out var centre, out float size);
+            aimMark.SetActive(found);
+            if (found)
+            {
+                aimMark.transform.position = centre;
+                aimMark.transform.localScale = Vector3.one * size * 1.08f;
+            }
+        }
+
+        /// <summary>The first slorm or inner wall block within range along <paramref name="step"/>, walking the maze
+        /// grid out from the slock's tile. Outer walls and a locked gate stop the search (they can't be shot).</summary>
+        bool FindSlugTarget(Vector2Int step, out Vector3 centre, out float size)
+        {
+            centre = default;
+            size = 0f;
+            int current = Mathf.Max(0, MazeChunk.IndexAt(slock.transform.position.z));
+            if (!chunks.TryGetValue(current, out var chunk) || chunk.Tiles == null) return false;
+            size = chunk.TileSize;
+            var from = chunk.KeyAt(slock.transform.position);
+            for (int i = 1; i <= SlugRangeTiles; i++)
+            {
+                var k = from + step * i;
+                foreach (var w in chunk.Slorms)
+                    if (!w.Eaten && chunk.KeyAt(w.transform.position) == k) { centre = w.transform.position; return true; }
+                int tx = k.x + chunk.Center, tz = k.y - chunk.RampTiles;
+                if (tx < 0 || tx >= chunk.W || tz < 0 || tz >= chunk.L) return false;
+                if (chunk.Tiles[tx, tz] == Tile.Wall)
+                {
+                    if (tx == 0 || tx == chunk.W - 1 || tz == 0 || tz == chunk.L - 1) return false; // outer wall
+                    centre = chunk.TileCenter(tx, tz) + Vector3.up * chunk.WallHeight * 0.5f;
+                    return true;
+                }
+                if (tz == chunk.L - 1 && !chunk.GateOpen) return false; // locked gate
+            }
+            return false;
+        }
+
+        void FireSlug()
+        {
+            aiming = false;
+            if (aimMark != null) aimMark.SetActive(false);
+            Time.timeScale = 1f;
             slugs--;
-            Slug.Fire(worldRoot, slock.transform.position, dir, slock.Size, 8f * slock.Size, 24f * slock.Size);
+            var dir = new Vector3(lastAim.x, 0f, lastAim.y);
+            chunks.TryGetValue(Mathf.Max(0, MazeChunk.IndexAt(slock.transform.position.z)), out var here);
+            Slug.Fire(worldRoot, slock.transform.position, dir, slock.Size, SlugRangeTiles * slock.Size, 24f * slock.Size, here);
         }
 
         /// <summary>A fired slug killed <paramref name="worm"/>: chain points plus its stolen time back.</summary>
@@ -416,12 +495,13 @@ namespace Slock
             wormChain++;
             wormsEaten++;
             bonusScore += pts;
+            timeLeft += WormTime;             // a slug kill counts as eating it
             float refund = worm.stolenTime;
             worm.stolenTime = 0f;
             if (refund > 0.05f) timeLeft += refund;
             worm.GetEaten(WormRespawn);
             string back = refund > 0.05f ? $"   +{refund:0}s back" : "";
-            Popup($"ZAPPED! +{pts}{back}", new Color(0.4f, 0.6f, 1f), 1.4f);
+            Popup($"ZAPPED! +{pts}   +{WormTime:0}s{back}", new Color(0.4f, 0.6f, 1f), 1.4f);
         }
 
         /// <summary>A fired slug hit a wall block: open it into floor (no pellet, gate count unchanged).</summary>
@@ -499,7 +579,7 @@ namespace Slock
                 Text(new Rect(w - 440, 140, 400, 30), $"BLOCK  {MazeChunk.BlockOf(height)}", label, new Color(1f, 1f, 1f, 0.7f), TextAnchor.UpperRight);
                 Text(new Rect(w - 440, 112, 400, 30), pelletsHere > 0 ? $"PELLETS LEFT  {pelletsHere}" : "GATE OPEN", label,
                     new Color(1f, 0.92f, 0.7f), TextAnchor.UpperRight);
-                Text(new Rect(w - 440, 168, 400, 30), slugs > 0 ? "SLUG READY — CLICK FIRES (aim with tilt)" : "SLUG SPENT", label,
+                Text(new Rect(w - 440, 168, 400, 30), aiming ? "AIMING — TILT TO PICK, CLICK TO FIRE" : slugs > 0 ? $"SLUGS x{slugs} — CLICK TO AIM" : "NO SLUGS", label,
                     new Color(1f, 1f, 1f, 0.7f), TextAnchor.UpperRight);
                 if (PowerActive)
                     Text(new Rect(w / 2 - 200, 112, 400, 30), $"POWER  {PowerRemaining:0.0}", label, new Color(0.45f, 0.6f, 1f), TextAnchor.UpperCenter);
@@ -605,7 +685,7 @@ namespace Slock
             GUI.color = new Color(1, 1, 1, 0.35f);
             GUI.DrawTexture(new Rect(c.x - radius, c.y - 0.5f, radius * 2, 1), Texture2D.whiteTexture);
             GUI.DrawTexture(new Rect(c.x - 0.5f, c.y - radius, 1, radius * 2), Texture2D.whiteTexture);
-            var s = rig.Stick;
+            var s = rig.Trackball;
             GUI.color = new Color(1, 1, 1, 0.8f);
             GUI.DrawTexture(new Rect(c.x + s.x * radius - 7, c.y - s.y * radius - 7, 14, 14), Texture2D.whiteTexture);
             GUI.color = Red;
@@ -626,23 +706,9 @@ namespace Slock
             y += 36;
 
             bool changed = false;
-            var toggle = new GUIStyle(GUI.skin.toggle) { fontSize = 16 };
-            toggle.normal.textColor = toggle.onNormal.textColor = Color.white;
-            bool tb = GUI.Toggle(new Rect(x, y, w, 26), ControlSettings.Trackball,
-                "  Trackball mode (mouse nudges the tilt, cursor hidden)", toggle);
-            if (tb != ControlSettings.Trackball) { ControlSettings.Trackball = tb; changed = true; }
-            y += 34;
-
-            bool f16 = GUI.Toggle(new Rect(x, y, w, 26), ControlSettings.F16Response,
-                "  F-16-inspired roll response", toggle);
-            if (f16 != ControlSettings.F16Response) { ControlSettings.F16Response = f16; changed = true; }
-            y += 34;
 
             changed |= Slider(ref y, x, w, "Mouse sensitivity", ref ControlSettings.Sensitivity, 0.2f, 3f, "tilt per mouse movement");
-            if (!ControlSettings.F16Response)
-                changed |= Slider(ref y, x, w, "Fine control", ref ControlSettings.ResponseCurve, 1f, 3f, "higher = gentler near level, same full tilt");
-            if (ControlSettings.Trackball)
-                changed |= Slider(ref y, x, w, "Auto-level", ref ControlSettings.Recenter, 0f, 3f, "board drifts back to level when you stop moving");
+            changed |= Slider(ref y, x, w, "Auto-level", ref ControlSettings.Recenter, 0f, 3f, "board drifts back to level when you stop moving");
             changed |= Slider(ref y, x, w, "Tilt response time", ref ControlSettings.TiltSmoothing, 0f, 0.3f, "lower = board follows the mouse instantly");
             changed |= Slider(ref y, x, w, "World tilt (degrees)", ref ControlSettings.MaxTilt, 8f, 35f, "visible tilt and physical downhill use this same angle");
             changed |= Slider(ref y, x, w, "Gravity strength", ref ControlSettings.FallGravity, 5f, 80f, "magnitude of the tilted world gravity vector");

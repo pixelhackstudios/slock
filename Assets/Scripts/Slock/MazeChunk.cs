@@ -29,7 +29,7 @@ namespace Slock
     public class MazeChunk : MonoBehaviour
     {
         public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
-        const float BaseWidth = 19f, BaseLength = 25f, RampLength = 6f;
+        const float BaseWidth = 25f, BaseLength = 31f, RampLength = 6f;
         public const float Rise = 1.0f;
         const float SideDrop = 1.5f;       // how far below its entrance a side room sits
 
@@ -94,6 +94,8 @@ namespace Slock
         struct Floater { public Transform t; public Vector3 home; public float phase, spin, bob; }
         readonly List<Floater> floaters = new();
         GameObject gate;
+        GameObject checkpoint;
+        bool exitSealed;
 
         /// <summary>A lower bonus area: its own tile grid, mirrored to the left (sign -1) or right (sign +1).</summary>
         class SideRoom
@@ -208,9 +210,10 @@ namespace Slock
             return t;
         }
 
-        /// <summary>Centre pen the slorms start in: a 5x4 wall ring (maze-local) with one opening toward the exit,
-        /// an approach block in front of it, and a 3x2 floor inside. Registers <see cref="penCells"/> (no pellets
-        /// or pickups there) and <see cref="penHomes"/> (slorm starting blocks).</summary>
+        /// <summary>Centre pen the slorms start in: a 6x4 wall ring (maze-local) with one opening toward the exit and a
+        /// 4x2 floor inside, standing clear in a one-block empty corridor all the way round (so it always reads as a
+        /// rectangle, and any maze corridor it cuts still connects via that ring). Registers <see cref="penCells"/>
+        /// (no pellets or pickups there) and <see cref="penHomes"/> (slorm starting blocks).</summary>
         void CarveSlormPen(Tile[,] t)
         {
             penCells.Clear();
@@ -218,17 +221,17 @@ namespace Slock
             int cx = Center;
             int cz = L / 2;
             if (cz % 2 == 0) cz++; // sit on a maze-cell row
-            int x0 = cx - 2, x1 = cx + 2, z0 = cz - 1, z1 = cz + 2;
-            if (x0 < 1 || x1 > W - 2 || z0 < 2 || z1 + 1 > L - 2) return; // too small: skip the pen
-            penX0 = x0; penZ0 = z0; penX1 = x1; penZ1 = z1 + 1;
-            for (int x = x0; x <= x1; x++)
-            for (int z = z0; z <= z1; z++)
+            int x0 = cx - 2, x1 = cx + 3, z0 = cz - 1, z1 = cz + 2;   // 4x2 = 8 open blocks inside, opening at cx
+            if (x0 - 1 < 1 || x1 + 1 > W - 2 || z0 - 1 < 2 || z1 + 1 > L - 2) return; // too small: skip the pen
+            penX0 = x0 - 1; penZ0 = z0 - 1; penX1 = x1 + 1; penZ1 = z1 + 1;
+            for (int x = penX0; x <= penX1; x++)
+            for (int z = penZ0; z <= penZ1; z++)
             {
+                bool ring = x == penX0 || x == penX1 || z == penZ0 || z == penZ1;
                 bool edge = x == x0 || x == x1 || z == z0 || z == z1;
                 bool opening = x == cx && z == z1;
-                t[x, z] = edge && !opening ? Tile.Wall : Tile.Floor;
+                t[x, z] = ring || !edge || opening ? Tile.Floor : Tile.Wall;
             }
-            t[cx, z1 + 1] = Tile.Floor; // approach in front of the opening
             for (int x = x0 + 1; x <= x1 - 1; x++)
             for (int z = z0 + 1; z <= z1 - 1; z++)
             {
@@ -236,7 +239,6 @@ namespace Slock
                 penHomes.Add(new(x, z));
             }
             penCells.Add(new(cx, z1));
-            penCells.Add(new(cx, z1 + 1));
         }
 
         /// <summary>Fallback when the pen blocks the only entry-to-exit path: flatten it to open floor.</summary>
@@ -537,6 +539,7 @@ namespace Slock
         public bool TryBlastWall(int tx, int tz)
         {
             if (Tiles == null || tx < 0 || tx >= W || tz < 0 || tz >= L) return false;
+            if (tx == 0 || tx == W - 1 || tz == 0 || tz == L - 1) return false; // outer boundary: never (no falling off)
             if (Tiles[tx, tz] != Tile.Wall) return false;
             Tiles[tx, tz] = Tile.Floor;
             RebuildMesh();
@@ -576,7 +579,7 @@ namespace Slock
         void SpawnCheckpoint()
         {
             var c = TileCenter(Center, L - 1);
-            var go = new GameObject("Checkpoint");
+            var go = checkpoint = new GameObject("Checkpoint");
             go.transform.SetParent(transform, false);
             go.transform.position = c + Vector3.up * 1f;
             var box = go.AddComponent<BoxCollider>();
@@ -700,6 +703,15 @@ namespace Slock
             }
         }
 
+        /// <summary>World positions of all currently uneaten pellets (main maze + side rooms).</summary>
+        public List<Vector3> UneatenPelletPositions()
+        {
+            var list = new List<Vector3>(pellets.Count);
+            foreach (var kv in pellets)
+                if (kv.Value.go != null) list.Add(kv.Value.go.transform.position);
+            return list;
+        }
+
         /// <summary>Eat the pellet on the block under <paramref name="world"/>, if any (main maze or side room).</summary>
         public bool TryEatPellet(Vector3 world, out bool gold)
         {
@@ -712,6 +724,18 @@ namespace Slock
             Destroy(p.go);
             pellets.Remove(key);
             return true;
+        }
+
+        /// <summary>The player has gone through: wall the exit up behind them so this section can't be re-entered
+        /// (an outer-boundary block, so slugs can't reopen it).</summary>
+        public void SealExit()
+        {
+            if (exitSealed || Tiles == null) return;
+            exitSealed = true;
+            Tiles[Center, L - 1] = Tile.Wall;
+            RebuildMesh();
+            if (checkpoint != null) Destroy(checkpoint);
+            gate = null;
         }
 
         public void OpenGate()
@@ -746,6 +770,17 @@ namespace Slock
                 worm.Init(this, cell, d.WormSpeed, rng.Next());
                 slorms.Add(worm);
             }
+        }
+
+        const float SlormReleaseGap = 4f;   // seconds between slorms leaving the pen
+        bool slormsReleased;
+
+        /// <summary>The player has entered this section: let its slorms out of the pen one at a time, Pac-Man style.</summary>
+        public void ReleaseSlorms()
+        {
+            if (slormsReleased) return;
+            slormsReleased = true;
+            for (int i = 0; i < slorms.Count; i++) slorms[i].ReleaseAt(Time.time + i * SlormReleaseGap);
         }
 
         /// <summary>All slorms in this section (including eaten ones waiting to respawn).</summary>
@@ -787,13 +822,13 @@ namespace Slock
         public static Difficulty For(int i) => new()
         {
             LoopChance = Mathf.Max(0.02f, 0.10f - i * 0.008f),
-            PitChance = Mathf.Min(0.5f, 0.15f + i * 0.03f),
+            PitChance = Mathf.Min(0.5f, 0.2f + i * 0.03f),
             OpenEdgeChance = Mathf.Min(0.95f, 0.4f + i * 0.06f),
-            MinRooms = 1,
-            MaxRooms = 3,
+            MinRooms = 2,
+            MaxRooms = 4,
             Pickups = 3 + Mathf.Min(3, i / 3),
-            Worms = Mathf.Min(6, 1 + (i + 1) / 2),
-            WormSpeed = Mathf.Min(5f, 2.2f + i * 0.15f),
+            Worms = 4 + i,                         // Pac-Man: 4 to start, one more per section
+            WormSpeed = Mathf.Min(9.6f, 4f + i * 0.3f),    // tiles/s
             TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
             EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
         };

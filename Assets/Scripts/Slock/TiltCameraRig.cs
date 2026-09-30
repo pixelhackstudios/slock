@@ -6,41 +6,18 @@ namespace Slock
     /// <summary>
     /// "Tilting the world": mouse input picks a tilt. A single tilted gravity vector drives the physics and the
     /// camera presents that exact same rotation, so apparent downhill and simulated downhill cannot diverge.
-    /// Two input modes (ControlSettings):
-    /// trackball (mouse movement nudges a virtual stick that stays put) or absolute (cursor offset from centre).
+    /// One control law: mouse movement accumulates into a persistent 2D trackball state (it stays where you
+    /// leave it unless recentering is enabled), a precision response shapes its magnitude
+    /// (magnitude^2.2: extremely fine near neutral, full tilt at full displacement), and that commands the tilt.
     /// </summary>
     public class TiltCameraRig : MonoBehaviour
     {
-        [System.Serializable]
-        public struct RollCommandSegment
-        {
-            [Min(0f)] public float forceLimitLb;
-            [Min(0f)] public float gainDegPerSecPerLb;
-
-            public RollCommandSegment(float forceLimitLb, float gainDegPerSecPerLb)
-            {
-                this.forceLimitLb = forceLimitLb;
-                this.gainDegPerSecPerLb = gainDegPerSecPerLb;
-            }
-        }
-
         public Transform target;
         public bool inputEnabled;
         /// <summary>When set, used instead of mouse/gamepad (automated playtests, demo mode).</summary>
         [System.NonSerialized] public Vector2? overrideTilt;
 
-        [SerializeField, Tooltip("Force-to-roll-rate schedule used when F16Response is enabled. The final force limit is full input.")]
-        RollCommandSegment[] f16RollCommandSchedule =
-        {
-            new RollCommandSegment(1f, 0f),
-            new RollCommandSegment(5f, 5f),
-            new RollCommandSegment(9f, 15f),
-            new RollCommandSegment(17f, 30f),
-        };
-
-        public float deadZone = 0.04f;
-        public float mouseRange = 0.16f;       // absolute mode: fraction of screen height for full tilt, at sensitivity 1
-        public float trackballPixels = 320f;   // trackball mode: mouse travel (px) from level to full tilt, at sensitivity 1
+        public float trackballPixels = 320f;   // mouse travel (px) from level to full tilt, at sensitivity 1
 
         public float yaw = 28f, pitch = 48f, distance = 20f;
         public float followSmoothing = 0.18f;
@@ -51,11 +28,11 @@ namespace Slock
 
         /// <summary>Current tilt, each axis in -1..1 (x = screen right, y = screen up).</summary>
         public Vector2 Tilt { get; private set; }
-        /// <summary>The raw input position (the virtual stick in trackball mode), -1..1, before the response curve.</summary>
-        public Vector2 Stick => stick;
+        /// <summary>The persistent trackball state, -1..1 on each axis, before the precision response.</summary>
+        public Vector2 Trackball => trackball;
 
-        Vector2 stick;
-        public void ResetStick() => stick = Vector2.zero;
+        Vector2 trackball;
+        public void ResetTrackball() => trackball = Vector2.zero;
 
         Vector2 tiltVel;
         Vector3 pivot, pivotVel;
@@ -82,118 +59,37 @@ namespace Slock
         {
             var mouse = Mouse.current;
             float sens = Mathf.Max(0.05f, ControlSettings.Sensitivity);
-            if (ControlSettings.Trackball)
-            {
-                // Mouse movement nudges the stick; it stays where you leave it (optionally drifting back to level).
-                if (mouse != null) stick += mouse.delta.ReadValue() * sens / trackballPixels;
-                stick = Vector2.MoveTowards(stick, Vector2.zero, ControlSettings.Recenter * Time.unscaledDeltaTime);
-            }
-            else if (mouse != null)
-            {
-                float scale = Mathf.Min(Screen.width, Screen.height) * mouseRange / sens;
-                stick = (mouse.position.ReadValue() - new Vector2(Screen.width, Screen.height) * 0.5f) / scale;
-            }
-            stick = Vector2.ClampMagnitude(stick, 1f);
+            // Mouse movement accumulates into the persistent trackball state; it stays where you leave it
+            // (optionally drifting back to level via Recenter).
+            if (mouse != null) trackball += mouse.delta.ReadValue() * sens / trackballPixels;
+            trackball = Vector2.MoveTowards(trackball, Vector2.zero, ControlSettings.Recenter * Time.unscaledDeltaTime);
+            trackball = Vector2.ClampMagnitude(trackball, 1f);
 
-            var v = stick;
+            var v = trackball;
             var pad = Gamepad.current;
             if (pad != null)
             {
-                var padStick = ControlSettings.F16Response
-                    ? pad.leftStick.ReadUnprocessedValue()
-                    : pad.leftStick.ReadValue();
-                float activityThreshold = ControlSettings.F16Response ? 0.0004f : 0.02f;
-                if (padStick.sqrMagnitude > activityThreshold) v = padStick;
+                var padStick = pad.leftStick.ReadValue();
+                if (padStick.sqrMagnitude > 0.0004f) v = padStick;
             }
 
+            // Precision response: direction unchanged, magnitude shaped for fine authority near
+            // neutral and full commanded tilt at full displacement.
             float mag = Mathf.Clamp01(v.magnitude);
-            if (ControlSettings.F16Response)
-            {
-                float shaped = EvaluateF16Response(mag);
-                return v.sqrMagnitude > 0f ? v.normalized * shaped : Vector2.zero;
-            }
-
-            if (mag < deadZone) return Vector2.zero;
-            // Remap past the dead zone, then curve it: small offsets give small tilts, full offset still gives full tilt.
-            float t = Mathf.Pow((mag - deadZone) / (1f - deadZone), ControlSettings.ResponseCurve);
-            return v.normalized * t;
+            return v.sqrMagnitude > 0f ? v.normalized * PrecisionResponse(mag) : Vector2.zero;
         }
 
-        float EvaluateF16Response(float magnitude)
+        /// <summary>Precision response: magnitude^2.2. Zero at neutral, full scale at full displacement,
+        /// extremely fine near center with continuously increasing gain outward. No dead zone, no breakpoints.</summary>
+        static float PrecisionResponse(float magnitude) => Mathf.Pow(Mathf.Clamp01(magnitude), 2.2f);
+
+        [ContextMenu("Log Precision Response Samples")]
+        void LogPrecisionResponseSamples()
         {
-            var schedule = f16RollCommandSchedule;
-            if (schedule == null || schedule.Length == 0) return Mathf.Clamp01(magnitude);
-
-            float fullForce = Mathf.Max(0f, schedule[schedule.Length - 1].forceLimitLb);
-            if (fullForce <= 0f) return 0f;
-
-            float force = Mathf.Clamp01(magnitude) * fullForce;
-            float command = IntegrateRollSchedule(force, schedule);
-            float maximumCommand = IntegrateRollSchedule(fullForce, schedule);
-            return maximumCommand > 0f ? Mathf.Clamp01(command / maximumCommand) : 0f;
-        }
-
-        static float IntegrateRollSchedule(float force, RollCommandSegment[] schedule)
-        {
-            float command = 0f;
-            float previousLimit = 0f;
-            foreach (var segment in schedule)
+            for (int i = 0; i <= 10; i++)
             {
-                float limit = Mathf.Max(previousLimit, segment.forceLimitLb);
-                float width = Mathf.Clamp(force - previousLimit, 0f, limit - previousLimit);
-                command += width * Mathf.Max(0f, segment.gainDegPerSecPerLb);
-                previousLimit = limit;
-            }
-            return command;
-        }
-
-        [ContextMenu("Log F-16 Response Samples and Continuity")]
-        void LogF16ResponseSamples()
-        {
-            var schedule = f16RollCommandSchedule;
-            if (schedule == null || schedule.Length == 0)
-            {
-                Debug.LogWarning("F-16 response schedule is empty.", this);
-                return;
-            }
-
-            float fullForce = Mathf.Max(0f, schedule[schedule.Length - 1].forceLimitLb);
-            float maximumCommand = IntegrateRollSchedule(fullForce, schedule);
-            if (fullForce <= 0f || maximumCommand <= 0f)
-            {
-                Debug.LogWarning("F-16 response schedule has no positive full-input command.", this);
-                return;
-            }
-
-            var samples = new System.Collections.Generic.List<float> { 0f };
-            foreach (var segment in schedule)
-            {
-                float input = Mathf.Clamp01(segment.forceLimitLb / fullForce);
-                if (samples[samples.Count - 1] < input) samples.Add(input);
-            }
-            if (samples[samples.Count - 1] < 1f) samples.Add(1f);
-
-            foreach (float input in samples)
-                Debug.Log($"F-16 response: input={input:F6}, output={EvaluateF16Response(input):F6}", this);
-
-            float epsilon = Mathf.Min(0.001f, fullForce * 0.0001f);
-            float maxGain = 0f;
-            foreach (var segment in schedule)
-                maxGain = Mathf.Max(maxGain, Mathf.Max(0f, segment.gainDegPerSecPerLb));
-            float tolerance = epsilon * maxGain / maximumCommand + 0.000001f;
-
-            float previousLimit = 0f;
-            foreach (var segment in schedule)
-            {
-                float limit = Mathf.Max(previousLimit, segment.forceLimitLb);
-                float input = limit / fullForce;
-                float left = EvaluateF16Response(Mathf.Max(0f, (limit - epsilon) / fullForce));
-                float at = EvaluateF16Response(input);
-                float right = EvaluateF16Response(Mathf.Min(1f, (limit + epsilon) / fullForce));
-                bool continuous = Mathf.Abs(left - at) <= tolerance && Mathf.Abs(right - at) <= tolerance;
-                Debug.Log($"F-16 breakpoint {limit:F3} lb: left={left:F6}, at={at:F6}, right={right:F6}, continuous={continuous}", this);
-                Debug.Assert(continuous, $"F-16 response is discontinuous at {limit:F3} lb.", this);
-                previousLimit = limit;
+                float m = i / 10f;
+                Debug.Log($"Precision response: input={m:F1}, output={PrecisionResponse(m):F6}", this);
             }
         }
 
