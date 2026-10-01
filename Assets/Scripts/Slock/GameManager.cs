@@ -198,6 +198,7 @@ namespace Slock
             Time.timeScale = 1f;
             runStartUnscaled = Time.unscaledTime;
             Popup("GO!", Color.white, 1f);
+            SnagTrace.BeginRun();
         }
 
         void EndRun(string reason)
@@ -224,6 +225,10 @@ namespace Slock
             Cursor.lockState = playing ? CursorLockMode.Locked : CursorLockMode.None;
             Cursor.visible = !playing;
         }
+
+        /// <summary>The section containing world <paramref name="z"/>, if it's loaded.</summary>
+        public MazeChunk ChunkAt(float z) =>
+            chunks.TryGetValue(Mathf.Max(0, MazeChunk.IndexAt(z)), out var c) ? c : null;
 
         void StreamChunks(int current)
         {
@@ -256,6 +261,7 @@ namespace Slock
                 case State.Playing:
                     if (esc) { SetPaused(true); break; }
                     if (kb != null && kb.rKey.wasPressedThisFrame) { StartRun(); break; }
+                    if (kb != null && kb.tKey.wasPressedThisFrame) Popup($"TILES: {Visuals.NextTileTheme().ToUpper()}", Color.white, 1.5f);
                     if (click && Time.unscaledTime - runStartUnscaled > 0.5f) OnFireClick();
                     if (aiming) UpdateAim();
                     TickRun();

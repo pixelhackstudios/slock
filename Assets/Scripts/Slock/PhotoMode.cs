@@ -49,17 +49,12 @@ namespace Slock
             yield return new WaitForSeconds(0.9f);
             yield return Hud("02_gameplay.png");
 
-            // 3. Jelly close-up: mid-squish against the start wall.
+            // 3. Jelly close-up: slid up against the start wall.
             rig.overrideTilt = Vector2.zero;
             s.ResetTo(new Vector3(0f, s.Height * 0.5f + 0.02f, 5f));
             yield return new WaitForSeconds(0.6f);
             rig.overrideTilt = -towardZ;
-            var jellyMesh = s.GetComponentInChildren<JellyWobble>().GetComponent<MeshFilter>();
-            for (float t = 0; t < 2.5f; t += Time.deltaTime)
-            {
-                if (jellyMesh.sharedMesh.bounds.size.z < 0.8f) break;
-                yield return null;
-            }
+            yield return new WaitForSeconds(1.2f);
             var p = s.transform.position;
             Render("03_jelly.png", p + new Vector3(2.3f, 1.5f, 1.6f), p + Vector3.up * 0.15f, 32f);
             rig.overrideTilt = Vector2.zero;

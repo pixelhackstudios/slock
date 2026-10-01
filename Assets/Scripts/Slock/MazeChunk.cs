@@ -29,9 +29,9 @@ namespace Slock
     public class MazeChunk : MonoBehaviour
     {
         public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
-        const float BaseWidth = 25f, BaseLength = 31f, RampLength = 6f;
+        const float BaseWidth = 18f, BaseLength = 18f, RampLength = 10f;
         public const float Rise = 1.0f;
-        const float SideDrop = 1.5f;       // how far below its entrance a side room sits
+        const float SideDrop = 3f;       // how far below its entrance a side room sits
 
         /// <summary>Block size of section <paramref name="index"/> in "resolution units" (60 at the start).</summary>
         public static int BlockOf(int index) => Mathf.Max(MinBlock, BaseBlock - BlockStep * Mathf.Max(0, index));
@@ -402,7 +402,7 @@ namespace Slock
         {
             float z = Z0 + k * TileSize, h = TileSize * 0.5f;
             float bot = Mathf.Min(y0, y1) - 3f;
-            mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All);
+            mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All, MeshBuilder.RampSub);
             mb.PrismX(x0, x1, z - 3 * h, z - h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
             mb.PrismX(x0, x1, z + h, z + 3 * h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
         }
@@ -481,7 +481,7 @@ namespace Slock
             float bot = Mathf.Min(prevY, FloorY) - 3f;
             var all = MeshBuilder.Faces.All;
 
-            mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
+            mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all, MeshBuilder.RampSub);
             mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
             mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
 
@@ -526,12 +526,13 @@ namespace Slock
             var mesh = mb.Build(name);
             gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = gameObject.AddComponent<MeshRenderer>();
-            mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop };
+            mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop, Visuals.Ramp };
             // MeshBuilder emits each quad with its own vertices; weld them so the collision surface is one clean mesh.
             var mc = gameObject.AddComponent<MeshCollider>();
             mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
                               | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
             mc.sharedMesh = mesh;
+            mc.hasModifiableContacts = true; // slock clears friction on wall-side contacts
         }
 
         /// <summary>Blast one wall block (maze-local <paramref name="tx"/>, <paramref name="tz"/>) into open floor,
@@ -673,8 +674,8 @@ namespace Slock
         void AddPellet(Transform root, Vector2Int key, float floorY, bool gold)
         {
             if (reserved.Contains(key) || pellets.ContainsKey(key)) return;
-            float size = (gold ? 0.24f : 0.2f) * TileSize;
-            var p = Decor(PrimitiveType.Cube, root, Vector3.zero, Vector3.one * size, gold ? Visuals.GoldPellet : Visuals.Pellet);
+            float size = (gold ? 0.28f : 0.23f) * TileSize;
+            var p = Decor(PrimitiveType.Sphere, root, Vector3.zero, Vector3.one * size, gold ? Visuals.GoldPellet : Visuals.Pellet);
             p.transform.position = KeyCenter(key, floorY) + Vector3.up * 0.3f * TileSize;
             p.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             pellets[key] = new Pellet { go = p, gold = gold };
@@ -688,7 +689,7 @@ namespace Slock
             });
         }
 
-        // Pellet cubes: sit flat, spin at their own speed and direction, and bob up and down out of step.
+        // Pellet spheres: spin at their own speed and direction, and bob up and down out of step.
         void Update()
         {
             float time = Time.time, amp = 0.06f * TileSize;
@@ -821,14 +822,14 @@ namespace Slock
 
         public static Difficulty For(int i) => new()
         {
-            LoopChance = Mathf.Max(0.02f, 0.10f - i * 0.008f),
-            PitChance = Mathf.Min(0.5f, 0.2f + i * 0.03f),
+            LoopChance = Mathf.Max(0.005f, 0.3f - i * 0.3f),
+            PitChance = Mathf.Min(0.5f, 0.2f + i * 0.05f),
             OpenEdgeChance = Mathf.Min(0.95f, 0.4f + i * 0.06f),
             MinRooms = 2,
             MaxRooms = 4,
             Pickups = 3 + Mathf.Min(3, i / 3),
             Worms = 4 + i,                         // Pac-Man: 4 to start, one more per section
-            WormSpeed = Mathf.Min(9.6f, 4f + i * 0.3f),    // tiles/s
+            WormSpeed = Mathf.Min(20.6f, 15f + i * 0.3f),    // tiles/s
             TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
             EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
         };

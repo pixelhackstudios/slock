@@ -78,45 +78,71 @@ public static class SlockBuild
         return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
     }
 
-    /// <summary>Import settings + URP Lit materials for the tile art in Assets/Textures/Tiles (floor, tops, walls).</summary>
+    /// <summary>
+    /// Import settings + URP Lit materials for the tile art in Assets/Textures/&lt;theme&gt;/ (floor, tops, walls, ramps, gate),
+    /// saved to Assets/Resources/Slock/&lt;theme&gt;/. Themes are listed in Slock.Visuals.TileThemes.
+    /// </summary>
     [MenuItem("Slock/Create Tile Materials")]
     public static void EnsureTileMaterials()
     {
-        const string tex = "Assets/Textures/Tiles/", mats = "Assets/Resources/Slock/Tiles";
-        if (!AssetDatabase.IsValidFolder(mats)) AssetDatabase.CreateFolder("Assets/Resources/Slock", "Tiles");
-        var sets = new (string file, string mat, Color tint)[]
+        var sets = new (string file, string mat)[] { ("floor", "Floor"), ("tops", "Tops"), ("walls", "Walls"), ("ramps", "Ramps"), ("gate", "Gate") };
+        foreach (var theme in Slock.Visuals.TileThemes)
         {
-            ("floor", "Floor", Color.white),   // no tint: the tile art as drawn
-            ("tops",  "Tops",  Color.white),
-            ("walls", "Walls", Color.white),
-        };
-        foreach (var (file, matName, tint) in sets)
-        {
-            if (AssetImporter.GetAtPath(tex + file + "_base.png") == null) continue;
-            Configure(tex + file + "_base.png", TextureImporterType.Default, true);
-            Configure(tex + file + "_normal.png", TextureImporterType.NormalMap, false);
-            Configure(tex + file + "_metalsmooth.png", TextureImporterType.Default, false);
-            Configure(tex + file + "_ao.png", TextureImporterType.Default, false);
-
-            string path = $"{mats}/{matName}.mat";
-            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (m == null)
+            string tex = $"Assets/Textures/{theme}/", mats = $"Assets/Resources/Slock/{theme}";
+            foreach (var (file, matName) in sets)
             {
-                m = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                AssetDatabase.CreateAsset(m, path);
+                if (AssetImporter.GetAtPath(tex + file + "_base.png") == null) continue;
+                if (!AssetDatabase.IsValidFolder(mats)) AssetDatabase.CreateFolder("Assets/Resources/Slock", theme);
+                Configure(tex + file + "_base.png", TextureImporterType.Default, true);
+                Configure(tex + file + "_normal.png", TextureImporterType.NormalMap, false);
+                Configure(tex + file + "_metalsmooth.png", TextureImporterType.Default, false);
+                Configure(tex + file + "_ao.png", TextureImporterType.Default, false);
+                Configure(tex + file + "_emission.png", TextureImporterType.Default, true);
+
+                string path = $"{mats}/{matName}.mat";
+                var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (m == null)
+                {
+                    m = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                    AssetDatabase.CreateAsset(m, path);
+                }
+                m.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_base.png"));
+                m.SetColor("_BaseColor", Color.white);   // no tint: the tile art as drawn
+                m.SetTexture("_BumpMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_normal.png"));
+                m.SetFloat("_BumpScale", 1f);
+                m.SetTexture("_MetallicGlossMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_metalsmooth.png"));
+                m.SetFloat("_Smoothness", 1f);   // scales the map's smoothness
+                m.SetTexture("_OcclusionMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_ao.png"));
+                m.SetFloat("_OcclusionStrength", 1f);
+                m.EnableKeyword("_NORMALMAP");
+                m.EnableKeyword("_METALLICSPECGLOSSMAP");
+                m.EnableKeyword("_OCCLUSIONMAP");
+                // Optional glow map (e.g. lit panel strips): white emission, masked by the map.
+                var glow = AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_emission.png");
+                m.SetTexture("_EmissionMap", glow);
+                m.SetColor("_EmissionColor", glow != null ? Color.white : Color.black);
+                if (glow != null)
+                {
+                    m.EnableKeyword("_EMISSION");
+                    m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+                }
+                else
+                {
+                    m.DisableKeyword("_EMISSION");
+                    m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+                }
+                if (file == "gate")   // see-through glass (base alpha = opacity), both sides so the back frame shows
+                {
+                    if (AssetImporter.GetAtPath(tex + file + "_base.png") is TextureImporter ti && !ti.alphaIsTransparency)
+                    {
+                        ti.alphaIsTransparency = true;
+                        ti.SaveAndReimport();
+                    }
+                    Slock.Visuals.ConfigureTransparent(m);
+                    m.SetFloat("_Cull", 0f);
+                }
+                EditorUtility.SetDirty(m);
             }
-            m.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_base.png"));
-            m.SetColor("_BaseColor", tint);
-            m.SetTexture("_BumpMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_normal.png"));
-            m.SetFloat("_BumpScale", 1f);
-            m.SetTexture("_MetallicGlossMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_metalsmooth.png"));
-            m.SetFloat("_Smoothness", 1f);   // scales the map's smoothness
-            m.SetTexture("_OcclusionMap", AssetDatabase.LoadAssetAtPath<Texture2D>(tex + file + "_ao.png"));
-            m.SetFloat("_OcclusionStrength", 1f);
-            m.EnableKeyword("_NORMALMAP");
-            m.EnableKeyword("_METALLICSPECGLOSSMAP");
-            m.EnableKeyword("_OCCLUSIONMAP");
-            EditorUtility.SetDirty(m);
         }
         AssetDatabase.SaveAssets();
     }

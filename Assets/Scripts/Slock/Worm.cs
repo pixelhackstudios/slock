@@ -4,21 +4,24 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// A slorm: a green block worm that inches through the maze like a telescope: the slock-sized head slides one block
-    /// and pauses, and each smaller block behind eases toward the one in front of it, tucking in behind (and
-    /// inside) the head; when the head moves on, the tail stretches back out. Nothing rotates: the blocks stay
-    /// square to the grid. The head is solid jelly: the slock cannot pass through it. Touching it bounces the slock
+    /// A slorm: a green block worm that inches through the maze like a telescope. The head, one tile cube, slides two
+    /// tiles while the body stays put; then it stops and the five segments (each 20% smaller than the one ahead)
+    /// follow in a short train until they are all tucked inside the head, and it slides again. Nothing rotates:
+    /// the blocks stay square to the grid. The head is solid jelly: the slock cannot pass through it. Touching it bounces the slock
     /// back and costs time, unless a power gem is active, in which case the head goes soft (trigger) and gets eaten.
     /// </summary>
     public class Worm : MonoBehaviour
     {
-        static readonly float[] SegmentScale = { 0.8f, 0.66f, 0.54f, 0.44f }; // body blocks, relative to the head
-        const float MoveShare = 0.6f;   // of each step: 60% sliding to the next block, 40% paused there
-        const float CatchUp = 6f;       // how quickly each body block closes in on the one ahead
+        static readonly float[] SegmentScale = { 0.8f, 0.64f, 0.512f, 0.41f, 0.328f }; // each 20% smaller than the one ahead
+        const int SlideTiles = 2;          // the head slides two tiles per move (one where two won't fit)
+        const float SegmentGap = 0.08f;    // edge-to-edge gap between segments in the train, in tiles
 
         MazeChunk chunk;
         Vector2Int from, to, home;
-        float t, stepTime, size, height;
+        float t, tilesPerSecond, size, height;
+        bool sliding;                       // head moving; otherwise the body is catching up
+        float gatherTime;
+        readonly List<Vector3> gatherFrom = new();
         System.Random rng;
         readonly List<Transform> body = new();
         readonly List<MeshRenderer> jellies = new();
@@ -28,7 +31,7 @@ namespace Slock
         float respawnAt;
         float releaseAt = float.MaxValue;   // waits at home in the pen until its section releases it
         int look = -1;
-        SphereCollider col;
+        BoxCollider col;
 
         public bool Eaten => eaten;
         /// <summary>Total time this slorm has taken from the player and still owes back on being eaten.</summary>
@@ -38,8 +41,8 @@ namespace Slock
         {
             chunk = c;
             size = c.TileSize;
-            height = size * 1.1f;         // same as the slock
-            stepTime = 1f / tilesPerSecond;
+            height = size;                // a one-tile cube
+            this.tilesPerSecond = tilesPerSecond;
             from = to = home = start;
             rng = new System.Random(seed);
 
@@ -48,11 +51,11 @@ namespace Slock
             transform.position = Pos(start);
             var rb = gameObject.AddComponent<Rigidbody>();
             rb.isKinematic = true;
-            col = gameObject.AddComponent<SphereCollider>();
+            col = gameObject.AddComponent<BoxCollider>();
             col.isTrigger = false;
-            col.radius = size * 0.45f;
+            col.size = Vector3.one * size * 0.9f;
 
-            AddBlock(transform, 1f, "Head");
+            AddBlock(transform, 1f, "Head", wobble: false); // stays an exact one-tile cube
             foreach (var s in SegmentScale)
             {
                 var seg = AddBlock(chunk.transform, s, "Segment");
@@ -62,7 +65,7 @@ namespace Slock
             PickNext();
         }
 
-        Transform AddBlock(Transform parent, float scale, string blockName)
+        Transform AddBlock(Transform parent, float scale, string blockName, bool wobble = true)
         {
             var mesh = Resources.Load<Mesh>("Slock/SlockJellyLow") ?? Resources.Load<Mesh>("Slock/SlockJelly");
             var go = new GameObject(blockName);
@@ -71,7 +74,7 @@ namespace Slock
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var r = go.AddComponent<MeshRenderer>();
             r.sharedMaterial = Visuals.WormJelly;
-            go.AddComponent<JellyWobble>();
+            if (wobble) go.AddComponent<JellyWobble>(); // squash/sway would bend the head off the tile size
             jellies.Add(r);
             allRenderers.Add(r);
             return go.transform;
@@ -99,7 +102,6 @@ namespace Slock
             eaten = false;
             stolenTime = 0f;
             from = to = home;
-            t = 0f;
             transform.position = Pos(home);
             for (int i = 0; i < body.Count; i++) body[i].position = FloorPoint(transform.position, SegmentScale[i]);
             col.enabled = true;
@@ -123,17 +125,30 @@ namespace Slock
             if (col != null && !eaten) col.isTrigger = want > 0;
         }
 
+        /// <summary>Start the next slide from <see cref="to"/>: two tiles straight on if it can, else one, never
+        /// straight back the way it came unless it's a dead end.</summary>
         void PickNext()
         {
+            var back = from - to;
+            if (back != Vector2Int.zero) back = new Vector2Int(System.Math.Sign(back.x), System.Math.Sign(back.y));
+            from = to;
+            to = Choose(SlideTiles, back) ?? Choose(1, back) ?? from + (back == Vector2Int.zero ? Vector2Int.zero : back);
+            t = 0f;
+            sliding = true;
+        }
+
+        Vector2Int? Choose(int tiles, Vector2Int back)
+        {
             options.Clear();
-            var back = from;
             foreach (var d in new[] { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right })
             {
-                var n = to + d;
-                if (chunk.IsCrawlable(n.x, n.y) && n != back) options.Add(n);
+                if (d == back) continue;
+                bool clear = true;
+                for (int i = 1; i <= tiles && clear; i++)
+                    clear = chunk.IsCrawlable(from.x + d.x * i, from.y + d.y * i);
+                if (clear) options.Add(from + d * tiles);
             }
-            from = to;
-            to = options.Count > 0 ? options[rng.Next(options.Count)] : back; // dead end: turn around
+            return options.Count > 0 ? options[rng.Next(options.Count)] : null;
         }
 
         void Update()
@@ -147,24 +162,38 @@ namespace Slock
             UpdateLook();
             if (Time.time < releaseAt) return; // still waiting in the pen
 
-            // Head: slide one block (eased), pause, repeat. Frightened worms are slow.
-            t += Time.deltaTime / stepTime * (look > 0 ? 0.55f : 1f);
-            if (t >= 1f) { t -= 1f; PickNext(); }
-            float m = Mathf.Clamp01(t / MoveShare);
-            m = m * m * (3f - 2f * m);
-            transform.position = Vector3.Lerp(Pos(from), Pos(to), m);
+            float speed = tilesPerSecond * (look > 0 ? 0.55f : 1f); // frightened slorms are slow
+            if (sliding)
+            {
+                // Head: one eased slide; the body stays where it was.
+                float tiles = Mathf.Max(1, Mathf.Abs(to.x - from.x) + Mathf.Abs(to.y - from.y));
+                t = Mathf.Min(1f, t + Time.deltaTime * speed / tiles);
+                float m = t * t * (3f - 2f * t);
+                transform.position = Vector3.Lerp(Pos(from), Pos(to), m);
+                if (t < 1f) return;
+                sliding = false;
+                gatherTime = 0f;
+                gatherFrom.Clear();
+                foreach (var seg in body) gatherFrom.Add(seg.position);
+                return;
+            }
 
-            // Body: each block eases toward the one ahead, so the worm stretches out while the head moves
-            // and telescopes back in (the small blocks tucking inside the head) while it pauses.
-            float k = 1f - Mathf.Exp(-CatchUp * Time.deltaTime);
-            var lead = transform.position;
+            // Body: each segment sets off once the one ahead is a block-edge gap clear of it, so the train is
+            // evenly spaced edge to edge (smaller blocks sit closer, centre to centre), and slides into the head.
+            gatherTime += Time.deltaTime;
+            bool gathered = true;
+            float lag = 0f;
             for (int i = 0; i < body.Count; i++)
             {
-                var seg = body[i];
-                var target = FloorPoint(lead, SegmentScale[i]);
-                seg.position = Vector3.Lerp(seg.position, target, k);
-                lead = seg.position;
+                if (i > 0) lag += size * ((SegmentScale[i - 1] + SegmentScale[i]) * 0.5f + SegmentGap);
+                var target = FloorPoint(transform.position, SegmentScale[i]);
+                float dist = Vector3.Distance(gatherFrom[i], target);
+                float travelled = Mathf.Max(0f, gatherTime * speed * size - lag);
+                float f = dist < 1e-4f ? 1f : Mathf.Clamp01(travelled / dist);
+                body[i].position = Vector3.Lerp(gatherFrom[i], target, f);
+                if (f < 1f) gathered = false;
             }
+            if (gathered) PickNext();
         }
 
         void OnTriggerEnter(Collider other)
