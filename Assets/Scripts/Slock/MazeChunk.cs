@@ -29,7 +29,7 @@ namespace Slock
     public class MazeChunk : MonoBehaviour
     {
         public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
-        const float BaseWidth = 18f, BaseLength = 18f, RampLength = 10f;
+        const float BaseWidth = 18f, BaseLength = 18f, RampLength = 20f;
         public const float Rise = 1.0f;
         const float SideDrop = 3f;       // how far below its entrance a side room sits
 
