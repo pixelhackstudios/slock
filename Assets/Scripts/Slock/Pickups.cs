@@ -25,8 +25,8 @@ namespace Slock
                     gem = MazeChunk.Decor(PrimitiveType.Cube, transform, Vector3.zero, Vector3.one * 0.32f, Visuals.Key).transform;
                     MazeChunk.Decor(PrimitiveType.Cube, gem, Vector3.zero, new Vector3(2.2f, 0.3f, 0.3f), Visuals.Key);
                     break;
-                default:
-                    gem = MazeChunk.Decor(PrimitiveType.Cube, transform, Vector3.zero, Vector3.one * 0.4f, Visuals.Pickup).transform;
+                default: // a big glowing power pellet
+                    gem = MazeChunk.Decor(PrimitiveType.Sphere, transform, Vector3.zero, Vector3.one * 0.46f, Visuals.Pickup).transform;
                     break;
             }
             phase = Random.value * 10f;

@@ -402,7 +402,7 @@ namespace Slock
         {
             float z = Z0 + k * TileSize, h = TileSize * 0.5f;
             float bot = Mathf.Min(y0, y1) - 3f;
-            mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All);
+            mb.PrismX(x0, x1, z - h, z + h, bot, y0, bot, y1, MeshBuilder.Faces.All, MeshBuilder.RampSub);
             mb.PrismX(x0, x1, z - 3 * h, z - h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
             mb.PrismX(x0, x1, z + h, z + 3 * h, bot, y0 + WallHeight, bot, y1 + WallHeight, MeshBuilder.Faces.All, MeshBuilder.WallTopSub);
         }
@@ -481,7 +481,7 @@ namespace Slock
             float bot = Mathf.Min(prevY, FloorY) - 3f;
             var all = MeshBuilder.Faces.All;
 
-            mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all);
+            mb.Prism(-h, h, zA, zB, bot, prevY, bot, FloorY, all, MeshBuilder.RampSub);
             mb.Prism(-3 * h, -h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
             mb.Prism(h, 3 * h, zA, zB, bot, prevY + WallHeight, bot, FloorY + WallHeight, all, MeshBuilder.WallTopSub);
 
@@ -526,7 +526,7 @@ namespace Slock
             var mesh = mb.Build(name);
             gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = gameObject.AddComponent<MeshRenderer>();
-            mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop };
+            mr.sharedMaterials = new[] { Visuals.FloorTop, Visuals.WallSide, Visuals.WallTop, Visuals.Ramp };
             // MeshBuilder emits each quad with its own vertices; weld them so the collision surface is one clean mesh.
             var mc = gameObject.AddComponent<MeshCollider>();
             mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
@@ -673,8 +673,8 @@ namespace Slock
         void AddPellet(Transform root, Vector2Int key, float floorY, bool gold)
         {
             if (reserved.Contains(key) || pellets.ContainsKey(key)) return;
-            float size = (gold ? 0.24f : 0.2f) * TileSize;
-            var p = Decor(PrimitiveType.Cube, root, Vector3.zero, Vector3.one * size, gold ? Visuals.GoldPellet : Visuals.Pellet);
+            float size = (gold ? 0.28f : 0.23f) * TileSize;
+            var p = Decor(PrimitiveType.Sphere, root, Vector3.zero, Vector3.one * size, gold ? Visuals.GoldPellet : Visuals.Pellet);
             p.transform.position = KeyCenter(key, floorY) + Vector3.up * 0.3f * TileSize;
             p.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             pellets[key] = new Pellet { go = p, gold = gold };
@@ -688,7 +688,7 @@ namespace Slock
             });
         }
 
-        // Pellet cubes: sit flat, spin at their own speed and direction, and bob up and down out of step.
+        // Pellet spheres: spin at their own speed and direction, and bob up and down out of step.
         void Update()
         {
             float time = Time.time, amp = 0.06f * TileSize;

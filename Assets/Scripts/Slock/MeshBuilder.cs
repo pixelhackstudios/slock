@@ -4,10 +4,10 @@ using UnityEngine.Rendering;
 
 namespace Slock
 {
-    /// <summary>Accumulates flat-shaded prisms into one mesh with floor-top, side and wall-top submeshes.</summary>
+    /// <summary>Accumulates flat-shaded prisms into one mesh with floor-top, side, wall-top and ramp submeshes.</summary>
     public class MeshBuilder
     {
-        public const int TopSub = 0, SideSub = 1, WallTopSub = 2;
+        public const int TopSub = 0, SideSub = 1, WallTopSub = 2, RampSub = 3;
 
         [System.Flags]
         public enum Faces { None = 0, Top = 1, PosX = 2, NegX = 4, PosZ = 8, NegZ = 16, AllSides = PosX | NegX | PosZ | NegZ, All = Top | AllSides }
@@ -15,9 +15,9 @@ namespace Slock
         readonly List<Vector3> verts = new();
         readonly List<Vector3> normals = new();
         readonly List<Vector2> uvs = new();
-        readonly List<int>[] tris = { new(), new(), new() };
+        readonly List<int>[] tris = { new(), new(), new(), new() };
         readonly float uvScale, zOrigin, yOrigin;
-        const float BlocksPerTexture = 1f; // each tile image is one whole block face (floor, wall top, wall side)
+        const float BlocksPerTexture = 1f; // each tile image is one whole block face (floor, wall top, wall side, ramp)
 
         /// <param name="zOrigin">World Z of a block centre (grids start at different Z per section).</param>
         /// <param name="yOrigin">World Y of the floor, so wall-side panels line up with it.</param>
@@ -90,13 +90,11 @@ namespace Slock
 
         public Mesh Build(string name)
         {
-            var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32, subMeshCount = 3 };
+            var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32, subMeshCount = tris.Length };
             mesh.SetVertices(verts);
             mesh.SetNormals(normals);
             mesh.SetUVs(0, uvs);
-            mesh.SetTriangles(tris[0], 0);
-            mesh.SetTriangles(tris[1], 1);
-            mesh.SetTriangles(tris[2], 2);
+            for (int i = 0; i < tris.Length; i++) mesh.SetTriangles(tris[i], i);
             mesh.RecalculateTangents(); // needed by the tile normal maps
             mesh.RecalculateBounds();
             return mesh;

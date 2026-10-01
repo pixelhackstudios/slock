@@ -5,18 +5,17 @@ namespace Slock
     /// <summary>Runtime-generated textures and materials, so the game needs no authored assets yet.</summary>
     public static class Visuals
     {
-        public static Material FloorTop, WallTop, WallSide, SlockBody, SlockJelly, SlockCore, WormJelly, WormScared, WormFlash, Pickup, Pellet, GoldPellet, Clock, Key, Boost, Checkpoint, Gate, AimMark;
+        public static Material FloorTop, WallTop, WallSide, Ramp, SlockBody, SlockJelly, SlockCore, WormJelly, WormScared, WormFlash, Pickup, Pellet, GoldPellet, Clock, Key, Boost, Checkpoint, Gate, AimMark;
 
         public static void Init()
         {
             if (FloorTop != null) return;
 
-            // Tile art (Assets/Textures/Tiles, materials made by SlockBuild.EnsureAssets); generated grids as a fallback.
-            FloorTop = Resources.Load<Material>("Slock/Tiles/Floor")
-                       ?? Make(Grid(new Color(0.80f, 0.80f, 0.82f), new Color(0.32f, 0.32f, 0.36f), true), Color.white, 0.2f);
-            WallTop = Resources.Load<Material>("Slock/Tiles/Tops") ?? FloorTop;
-            WallSide = Resources.Load<Material>("Slock/Tiles/Walls")
-                       ?? Make(Grid(new Color(0.10f, 0.62f, 0.92f), new Color(0.02f, 0.10f, 0.28f), false), Color.white, 0.35f);
+            // Tile surfaces start as generated grids; a tile theme's art (if present) is copied over them.
+            FloorTop = Make(Grid(new Color(0.80f, 0.80f, 0.82f), new Color(0.32f, 0.32f, 0.36f), true), Color.white, 0.2f);
+            WallSide = Make(Grid(new Color(0.10f, 0.62f, 0.92f), new Color(0.02f, 0.10f, 0.28f), false), Color.white, 0.35f);
+            WallTop = new Material(FloorTop);
+            Ramp = new Material(FloorTop);
             SlockBody = Make(null, new Color(0.95f, 0.10f, 0.16f), 0.85f, new Color(0.55f, 0.02f, 0.05f));
             SlockJelly = MakeJelly(new Color(0.85f, 0.0f, 0.06f, 0.72f), new Color(0.45f, 0.0f, 0.03f));
             SlockCore = Make(null, new Color(0.45f, 0.0f, 0.04f), 0.6f, new Color(0.5f, 0.0f, 0.05f));
@@ -25,15 +24,68 @@ namespace Slock
             WormJelly = Make(null, new Color(0.2f, 0.75f, 0.12f), 0.8f, new Color(0.02f, 0.18f, 0.0f));
             WormScared = Make(null, new Color(0.15f, 0.3f, 1f), 0.8f, new Color(0.02f, 0.08f, 0.5f));
             WormFlash = Make(null, Color.white, 0.8f, new Color(0.6f, 0.6f, 0.6f));
+            // Pellets: smooth glowing glass spheres (no edge lines).
+            Pellet = MakeJelly(new Color(0.25f, 0.55f, 1f, 0.72f), new Color(0.1f, 0.35f, 1.2f));
+            GoldPellet = MakeJelly(new Color(1f, 0.75f, 0.1f, 0.72f), new Color(1.3f, 0.8f, 0.1f));
+            Pickup = MakeJelly(new Color(1f, 0.85f, 0.15f, 0.72f), new Color(1.2f, 0.85f, 0.1f));
             // Glass cubes with black edge lines.
-            Pellet = MakeGlass(new Color(0.25f, 0.55f, 1f), new Color(0.1f, 0.35f, 1.2f));
-            GoldPellet = MakeGlass(new Color(1f, 0.75f, 0.1f), new Color(1.3f, 0.8f, 0.1f));
             Clock = MakeGlass(new Color(0.3f, 0.9f, 1f), new Color(0.3f, 1.3f, 1.6f));
             Key = MakeGlass(new Color(1f, 0.3f, 1f), new Color(1.5f, 0.2f, 1.5f));
             Boost = Make(null, new Color(1f, 0.6f, 0.1f), 0.5f, new Color(2f, 0.9f, 0.1f));
             Gate = MakeGlass(new Color(0.1f, 0.8f, 0.8f), new Color(0.05f, 0.7f, 0.7f));
-            Pickup = MakeGlass(new Color(1f, 0.85f, 0.15f), new Color(1.2f, 0.85f, 0.1f));
             Checkpoint = Make(null, new Color(0.2f, 1f, 0.95f), 0.5f, new Color(0.2f, 1.6f, 1.5f));
+            defaultGate = new Material(Gate);   // themes without gate art use the glowing glass cube
+            int saved = System.Array.IndexOf(TileThemes, PlayerPrefs.GetString(ThemePref, TileThemes[0]));
+            SetTileTheme(Mathf.Max(0, saved));
+        }
+
+        /// <summary>Tile art sets: Assets/Textures/&lt;theme&gt; -> Resources/Slock/&lt;theme&gt; (see SlockBuild.EnsureTileMaterials).</summary>
+        public static readonly string[] TileThemes = { "Tiles", "SciFi" };
+        const string ThemePref = "slock.theme";
+        public static string TileTheme { get; private set; } = "Grid";
+        static Material defaultGate;
+
+        /// <summary>Switch to the next tile theme that has materials; returns its name.</summary>
+        public static string NextTileTheme()
+        {
+            int i = System.Array.IndexOf(TileThemes, TileTheme);
+            SetTileTheme(i + 1);
+            return TileTheme;
+        }
+
+        /// <summary>
+        /// Copy a theme's materials onto the shared tile materials, so every chunk already built changes at once.
+        /// Starts at <paramref name="index"/> and skips themes with no materials; ramps fall back to the theme's floor,
+        /// the gate to the glowing glass cube.
+        /// </summary>
+        static void SetTileTheme(int index)
+        {
+            for (int n = 0; n < TileThemes.Length; n++)
+            {
+                int i = ((index + n) % TileThemes.Length + TileThemes.Length) % TileThemes.Length;
+                string dir = "Slock/" + TileThemes[i] + "/";
+                var floor = Resources.Load<Material>(dir + "Floor");
+                if (floor == null) continue;
+                CopyInto(FloorTop, floor);
+                CopyInto(WallTop, Resources.Load<Material>(dir + "Tops") ?? floor);
+                CopyInto(WallSide, Resources.Load<Material>(dir + "Walls") ?? floor);
+                CopyInto(Ramp, Resources.Load<Material>(dir + "Ramps") ?? floor);
+                CopyInto(Gate, Resources.Load<Material>(dir + "Gate") ?? defaultGate);
+                TileTheme = TileThemes[i];
+                PlayerPrefs.SetString(ThemePref, TileTheme);
+                return;
+            }
+        }
+
+        // Our own copies are edited, never the saved assets (editing those at runtime would change them on disk).
+        static void CopyInto(Material dst, Material src)
+        {
+            dst.shader = src.shader;
+            dst.CopyPropertiesFromMaterial(src);
+            dst.shaderKeywords = src.shaderKeywords;
+            dst.globalIlluminationFlags = src.globalIlluminationFlags;
+            dst.renderQueue = src.renderQueue;                       // opaque tiles vs see-through glass
+            dst.SetOverrideTag("RenderType", src.GetTag("RenderType", false));
         }
 
         /// <summary>

@@ -40,3 +40,9 @@ __pycache__/
 # Unity crash dumps and stray build output
 mono_crash.*
 /Data/
+
+# Blender auto-backups
+*.blend1
+
+# Downloaded asset zips (the extracted folders are kept)
+/art-work/downloaded-attrbutions/*.zip

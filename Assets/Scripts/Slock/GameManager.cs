@@ -256,6 +256,7 @@ namespace Slock
                 case State.Playing:
                     if (esc) { SetPaused(true); break; }
                     if (kb != null && kb.rKey.wasPressedThisFrame) { StartRun(); break; }
+                    if (kb != null && kb.tKey.wasPressedThisFrame) Popup($"TILES: {Visuals.NextTileTheme().ToUpper()}", Color.white, 1.5f);
                     if (click && Time.unscaledTime - runStartUnscaled > 0.5f) OnFireClick();
                     if (aiming) UpdateAim();
                     TickRun();
