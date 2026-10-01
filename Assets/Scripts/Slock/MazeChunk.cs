@@ -29,9 +29,9 @@ namespace Slock
     public class MazeChunk : MonoBehaviour
     {
         public const int BaseBlock = 60, BlockStep = 2, MinBlock = 20;
-        const float BaseWidth = 25f, BaseLength = 31f, RampLength = 6f;
+        const float BaseWidth = 18f, BaseLength = 18f, RampLength = 10f;
         public const float Rise = 1.0f;
-        const float SideDrop = 1.5f;       // how far below its entrance a side room sits
+        const float SideDrop = 3f;       // how far below its entrance a side room sits
 
         /// <summary>Block size of section <paramref name="index"/> in "resolution units" (60 at the start).</summary>
         public static int BlockOf(int index) => Mathf.Max(MinBlock, BaseBlock - BlockStep * Mathf.Max(0, index));
@@ -532,6 +532,7 @@ namespace Slock
             mc.cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning
                               | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
             mc.sharedMesh = mesh;
+            mc.hasModifiableContacts = true; // slock clears friction on wall-side contacts
         }
 
         /// <summary>Blast one wall block (maze-local <paramref name="tx"/>, <paramref name="tz"/>) into open floor,
@@ -821,14 +822,14 @@ namespace Slock
 
         public static Difficulty For(int i) => new()
         {
-            LoopChance = Mathf.Max(0.02f, 0.10f - i * 0.008f),
-            PitChance = Mathf.Min(0.5f, 0.2f + i * 0.03f),
+            LoopChance = Mathf.Max(0.005f, 0.3f - i * 0.3f),
+            PitChance = Mathf.Min(0.5f, 0.2f + i * 0.05f),
             OpenEdgeChance = Mathf.Min(0.95f, 0.4f + i * 0.06f),
             MinRooms = 2,
             MaxRooms = 4,
             Pickups = 3 + Mathf.Min(3, i / 3),
             Worms = 4 + i,                         // Pac-Man: 4 to start, one more per section
-            WormSpeed = Mathf.Min(9.6f, 4f + i * 0.3f),    // tiles/s
+            WormSpeed = Mathf.Min(20.6f, 15f + i * 0.3f),    // tiles/s
             TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
             EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
         };

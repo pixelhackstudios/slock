@@ -198,6 +198,7 @@ namespace Slock
             Time.timeScale = 1f;
             runStartUnscaled = Time.unscaledTime;
             Popup("GO!", Color.white, 1f);
+            SnagTrace.BeginRun();
         }
 
         void EndRun(string reason)
@@ -224,6 +225,10 @@ namespace Slock
             Cursor.lockState = playing ? CursorLockMode.Locked : CursorLockMode.None;
             Cursor.visible = !playing;
         }
+
+        /// <summary>The section containing world <paramref name="z"/>, if it's loaded.</summary>
+        public MazeChunk ChunkAt(float z) =>
+            chunks.TryGetValue(Mathf.Max(0, MazeChunk.IndexAt(z)), out var c) ? c : null;
 
         void StreamChunks(int current)
         {

@@ -1,10 +1,12 @@
+using Unity.Collections;
 using UnityEngine;
 
 namespace Slock
 {
     /// <summary>
-    /// The sliding block. The world's tilted gravity does all the pushing and surface friction is the only resistance;
-    /// it rides tile-centre rails, turns Pac-Man style, stays flush on ramps and drops cleanly into holes.
+    /// The sliding block. Tilted gravity pushes; floor/ramp friction is the only drag. Wall contacts are frictionless
+    /// and squared to the grid so panel seams don't snag the slide. It stays on tile-centre rails and turns
+    /// Pac-Man style at centres.
     /// </summary>
     [RequireComponent(typeof(Rigidbody))]
     public class SlockController : MonoBehaviour
@@ -12,7 +14,7 @@ namespace Slock
         /// <summary>Width of the block: always exactly one grid block of the section it's in.</summary>
         public float Size { get; private set; } = 1f;
         public float Height => Size * 1.1f;      // a hair taller than the walls (which are Size tall)
-        const float Shrink = 0.01f;              // hull undersize vs a tile (1%): stops wedging, stays grid-true
+        const float Shrink = 0.1f;              // hull undersize vs a tile (1%): stops wedging, stays grid-true
         // Compensation for this collider's flat-face contact patch: measured (coast test on a level floor), a sliding box here is
         // slowed by exactly twice the material's friction coefficient (PhysX friction patches use multiple contact points).
         // The material gets half of ControlSettings.Friction so that value is the real mu. Re-measure if the collider shape changes.
@@ -36,6 +38,7 @@ namespace Slock
         public float turnSnap = 14f;         // how fast it slides to a tile centre to take a turn
         public float turnBias = 1.15f;       // tilt must favour the other axis by this much to turn (no jitter on diagonals)
         bool travelZ = true;                 // rail it's on: true = runs along Z (X locked), false = runs along X (Z locked)
+        float prevFlatSpeed;                 // snag trace: detect sudden scrub
 
         public Rigidbody Body { get; private set; }
         public bool Grounded { get; private set; }
@@ -73,9 +76,9 @@ namespace Slock
                 Destroy(tmp);
             }
             hullCollider.sharedMesh = hullMesh != null ? hullMesh : jellyMesh; // the full jelly is over PhysX's convex limit
+            hullCollider.hasModifiableContacts = true; // so wall-side friction can be cleared
             body.AddComponent<MeshFilter>().sharedMesh = jellyMesh;
             body.AddComponent<MeshRenderer>().sharedMaterial = Visuals.SlockJelly;
-            var jelly = body.AddComponent<JellyWobble>();
             // A darker core you can see through the jelly, for depth.
             var core = new GameObject("Core");
             core.transform.SetParent(body.transform, false);
@@ -84,7 +87,6 @@ namespace Slock
             var coreRenderer = core.AddComponent<MeshRenderer>();
             coreRenderer.sharedMaterial = Visuals.SlockCore;
             coreRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            jelly.core = core.transform;
 
 
             var s = go.AddComponent<SlockController>();
@@ -119,11 +121,59 @@ namespace Slock
         {
             Body = GetComponent<Rigidbody>();
             Body.mass = 1f;
-            Body.linearDamping = 0f;    // no hidden drag: surface friction is the only resistance
+            Body.linearDamping = 0f;    // no hidden drag: floor friction is the only resistance
             Body.angularDamping = 5f;
             Body.constraints = RigidbodyConstraints.FreezeRotation;
             Body.interpolation = RigidbodyInterpolation.Interpolate;
             Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        }
+
+        void OnEnable()
+        {
+            Physics.ContactModifyEvent += SquareWallContacts;
+            Physics.ContactModifyEventCCD += SquareWallContactsCCD;
+        }
+
+        void OnDisable()
+        {
+            Physics.ContactModifyEvent -= SquareWallContacts;
+            Physics.ContactModifyEventCCD -= SquareWallContactsCCD;
+        }
+
+        /// <summary>
+        /// Floor/ramp (normal mostly up) are left alone. Wall contacts get no friction, and their normal is squared
+        /// to the nearest grid axis: the maze mesh is separate triangles per tile, and where two flush wall panels
+        /// meet PhysX treats the seam as an edge and pushes along the hull's bevel (~15° back along the rail), which
+        /// braked the slide. Every maze wall faces ±X or ±Z, so squaring the normal costs nothing real.
+        /// </summary>
+        static void SquareWallContacts(PhysicsScene _, NativeArray<ModifiableContactPair> pairs) => Square(pairs, false);
+        static void SquareWallContactsCCD(PhysicsScene _, NativeArray<ModifiableContactPair> pairs) => Square(pairs, true);
+
+        static bool traceRailZ = true; // snag trace: which way along-rail is, for the physics callback
+
+        static void Square(NativeArray<ModifiableContactPair> pairs, bool ccd)
+        {
+            for (int i = 0; i < pairs.Length; i++)
+            {
+                var pair = pairs[i];
+                for (int c = 0; c < pair.contactCount; c++)
+                {
+                    var n = pair.GetNormal(c);
+                    if (SnagTrace.Enabled)
+                    {
+                        // Anything pushing along the rail can brake the slide: walls past ~3°, floor past ~9°.
+                        float alongN = Mathf.Abs(traceRailZ ? n.z : n.x);
+                        if (alongN > (Mathf.Abs(n.y) >= 0.5f ? 0.15f : 0.05f))
+                            SnagTrace.RawContact(pair.GetPoint(c), n, pair.GetSeparation(c), ccd, traceRailZ);
+                    }
+                    if (Mathf.Abs(n.y) >= 0.5f) continue;
+                    pair.SetDynamicFriction(c, 0f);
+                    pair.SetStaticFriction(c, 0f);
+                    pair.SetNormal(c, Mathf.Abs(n.x) >= Mathf.Abs(n.z)
+                        ? new Vector3(Mathf.Sign(n.x), 0f, 0f)
+                        : new Vector3(0f, 0f, Mathf.Sign(n.z)));
+                }
+            }
         }
 
         public void ResetTo(Vector3 position)
@@ -167,6 +217,7 @@ namespace Slock
             if (!Mathf.Approximately(Size, targetSize))
                 ApplySize(Mathf.MoveTowards(Size, targetSize, shrinkSpeed * Time.fixedDeltaTime));
 
+            SnagTrace.Flush();
             var p = Body.position;
             var v = Body.linearVelocity;
 
@@ -261,6 +312,78 @@ namespace Slock
             {
                 flat = flat.normalized * ControlSettings.MaxSpeed;
                 Body.linearVelocity = new Vector3(flat.x, v.y, flat.z);
+            }
+
+            traceRailZ = travelZ;
+            TraceCorner();
+            float flatSp = new Vector3(Body.linearVelocity.x, 0f, Body.linearVelocity.z).magnitude;
+            if (Grounded && prevFlatSpeed > 1.5f && flatSp < prevFlatSpeed * 0.85f)
+            {
+                SnagTrace.Event("speed_drop",
+                    $"from={prevFlatSpeed:F2} to={flatSp:F2} pos=({Body.position.x:F2},{Body.position.z:F2}) rail={(travelZ ? "Z" : "X")}");
+            }
+            prevFlatSpeed = flatSp;
+        }
+
+        Vector2Int traceFrontCell = new(int.MinValue, int.MinValue);
+
+        /// <summary>Snag trace: log each time the front edge enters a tile where a side wall starts or ends.</summary>
+        void TraceCorner()
+        {
+            if (!SnagTrace.Enabled || GameManager.I == null) return;
+            var p = Body.position;
+            var v = Body.linearVelocity;
+            float alongV = travelZ ? v.z : v.x;
+            if (Mathf.Abs(alongV) < 0.2f) return;
+            var chunk = GameManager.I.ChunkAt(p.z);
+            if (chunk == null || chunk.Tiles == null) return;
+
+            var dir = travelZ ? new Vector3(0f, 0f, Mathf.Sign(alongV)) : new Vector3(Mathf.Sign(alongV), 0f, 0f);
+            var side = travelZ ? new Vector3(-dir.z, 0f, 0f) : new Vector3(0f, 0f, dir.x); // left of travel
+            var front = p + dir * (Size * 0.5f * (1f - Shrink));
+            var cell = chunk.KeyAt(front);
+            if (cell == traceFrontCell) return;
+            bool first = traceFrontCell.x == int.MinValue;
+            traceFrontCell = cell;
+            if (first) return;
+
+            char T(Vector3 w)
+            {
+                var k = chunk.KeyAt(w);
+                int tx = k.x + chunk.Center, tz = k.y - chunk.RampTiles;
+                if (!chunk.InBounds(tx, tz)) return '-';
+                return chunk.Tiles[tx, tz] switch { Tile.Wall => 'W', Tile.Floor => 'F', _ => 'V' };
+            }
+            float ts = chunk.TileSize;
+            var centre = new Vector3(cell.x * ts, p.y, chunk.Z0 + cell.y * ts);
+            char lb = T(centre - dir * ts + side * ts), la = T(centre + side * ts);
+            char rb = T(centre - dir * ts - side * ts), ra = T(centre - side * ts);
+            if (lb == la && rb == ra) return; // straight wall both sides: no corner here
+            float drift = travelZ ? p.x - Snap(p.x, gridTs) : p.z - SnapZ(p.z);
+            SnagTrace.Event("corner",
+                $"cell=({cell.x},{cell.y}) L={lb}>{la} R={rb}>{ra} drift={drift:F3} spd={Mathf.Abs(alongV):F2} " +
+                $"pos=({p.x:F2},{p.z:F2}) rail={(travelZ ? "Z" : "X")}");
+        }
+
+        void OnCollisionEnter(Collision collision)
+        {
+            LogWallContacts("wall_hit", collision);
+        }
+
+        void OnCollisionStay(Collision collision)
+        {
+            LogWallContacts("wall_scrub", collision);
+        }
+
+        void LogWallContacts(string kind, Collision collision)
+        {
+            if (!SnagTrace.Enabled || collision == null) return;
+            var vel = Body.linearVelocity;
+            for (int i = 0; i < collision.contactCount; i++)
+            {
+                var c = collision.GetContact(i);
+                if (Mathf.Abs(c.normal.y) >= 0.97f) continue; // flat floor (tilted floor contacts are logged: seam suspects)
+                SnagTrace.Wall(kind, c.point, c.normal, c.impulse.magnitude, vel, travelZ);
             }
         }
 
