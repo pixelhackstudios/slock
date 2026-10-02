@@ -33,8 +33,7 @@ namespace Slock
             Directory.CreateDirectory(dir);
             var gm = GameManager.I;
             var rig = FindAnyObjectByType<TiltCameraRig>();
-            float yaw = rig.yaw * Mathf.Deg2Rad;
-            var towardZ = new Vector2(-Mathf.Sin(yaw), Mathf.Cos(yaw)); // tilt that pushes the slock up the course (+z)
+            var towardZ = rig.TiltToward(Vector3.forward); // tilt that pushes the slock up the course (+z)
 
             // 1. Title screen (with the studio credit).
             yield return new WaitForSeconds(1.5f);

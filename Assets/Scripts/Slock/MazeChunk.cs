@@ -959,7 +959,7 @@ namespace Slock
     /// <summary>How nasty chunk N is. Everything ramps up and then plateaus.</summary>
     public struct Difficulty
     {
-        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance;
+        public float LoopChance, PitChance, OpenEdgeChance, WormSpeed, TimeBonus, EdgeRoomChance, Speed;
         public int MinRooms, MaxRooms, Pickups, Worms;
 
         public static Difficulty For(int i) => new()
@@ -974,6 +974,7 @@ namespace Slock
             WormSpeed = Mathf.Min(20.6f, 15f + i * 0.3f),    // tiles/s
             TimeBonus = Mathf.Max(7f, 18f - i * 0.5f),
             EdgeRoomChance = i == 0 ? 1f : 0.7f,   // the first section always shows one off
+            Speed = 1f + Mathf.Min(0.6f, i * 0.05f), // slock gravity, in blocks: +5% a section, up to +60%
         };
     }
 }

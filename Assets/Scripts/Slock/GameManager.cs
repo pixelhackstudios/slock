@@ -172,6 +172,7 @@ namespace Slock
             slock.SetGrid(MazeChunk.TileSizeOf(0), MazeChunk.StartZOf(0));
             slock.ResetTo(new Vector3(0f, slock.Height * 0.5f + 0.02f, MazeChunk.StartZOf(0) + MazeChunk.TileSizeOf(0)));
             rig.zoom = 1f;
+            rig.gravityScale = slock.Size * Difficulty.For(0).Speed;
             rig.SnapToTarget();
             timeLeft = StartTime;
             runSeconds = maxZ = 0f;
@@ -304,6 +305,8 @@ namespace Slock
             maxZ = Mathf.Max(maxZ, p.z);
             int current = Mathf.Max(0, MazeChunk.IndexAt(p.z));
             StreamChunks(current);
+            // Gravity scales with the block size, so speed in blocks only changes by the section's ramp.
+            rig.gravityScale = slock.Size * Difficulty.For(current).Speed;
             if (chunks.TryGetValue(current, out var here))
             {
                 slock.SetGrid(here.TileSize, here.Z0);

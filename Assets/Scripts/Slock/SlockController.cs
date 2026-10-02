@@ -79,6 +79,7 @@ namespace Slock
             hullCollider.hasModifiableContacts = true; // so wall-side friction can be cleared
             body.AddComponent<MeshFilter>().sharedMesh = jellyMesh;
             body.AddComponent<MeshRenderer>().sharedMaterial = Visuals.SlockJelly;
+            var jelly = body.AddComponent<JellyWobble>();
             // A darker core you can see through the jelly, for depth.
             var core = new GameObject("Core");
             core.transform.SetParent(body.transform, false);
@@ -87,6 +88,7 @@ namespace Slock
             var coreRenderer = core.AddComponent<MeshRenderer>();
             coreRenderer.sharedMaterial = Visuals.SlockCore;
             coreRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            jelly.core = core.transform;
 
 
             var s = go.AddComponent<SlockController>();
@@ -303,7 +305,7 @@ namespace Slock
             if (away.sqrMagnitude < 1e-6f) away = Vector3.back;
             away.Normalize();
             // v = sqrt(2*a*d): friction is the only resistance, so this slides ~tiles blocks.
-            float a = Mathf.Max(0.5f, ControlSettings.Friction * ControlSettings.FallGravity);
+            float a = Mathf.Max(0.5f, ControlSettings.Friction * Physics.gravity.magnitude);
             float speed = Mathf.Sqrt(2f * a * tiles * Size);
             speed = Mathf.Clamp(speed, 2.5f, 12f);
             Body.linearVelocity = new Vector3(away.x * speed, Body.linearVelocity.y, away.z * speed);

@@ -9,9 +9,9 @@ namespace Slock
     public static class ControlSettings
     {
         // Defaults
-        // Tuned by playtest (2026-09-29): the best-feeling set so far.
-        const float DefSensitivity = 1f, DefRecenter = 0f, DefSmoothing = 0.25f, DefMaxTilt = 20f,
-                    DefFallGravity = 60f, DefFriction = 0.052f, DefSpeedLimit = 60f;
+        // Tuned by playtest (2026-10-02): snappier, more action-game tilt.
+        const float DefSensitivity = 1f, DefRecenter = 0f, DefSmoothing = 0.2f, DefMaxTilt = 25f,
+                    DefFallGravity = 75f, DefFriction = 0.058f, DefSpeedLimit = 60f;
 
         public static float Sensitivity = DefSensitivity;   // tilt per unit of mouse movement
         public static float Recenter = DefRecenter;         // how fast the trackball drifts back to level (/s)

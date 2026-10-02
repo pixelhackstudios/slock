@@ -25,6 +25,8 @@ namespace Slock
         public float zoom = 1f;
         float zoomNow = 1f;
         public float lookAhead = 3f;
+        /// <summary>Multiplies gravity strength: block size times the section's speed ramp (set by the game).</summary>
+        [System.NonSerialized] public float gravityScale = 1f;
 
         /// <summary>Current tilt, each axis in -1..1 (x = screen right, y = screen up).</summary>
         public Vector2 Tilt { get; private set; }
@@ -52,7 +54,7 @@ namespace Slock
             var want = overrideTilt ?? (inputEnabled ? ReadInput() : Vector2.zero);
             Tilt = Vector2.SmoothDamp(Tilt, want, ref tiltVel, Mathf.Max(0.001f, ControlSettings.TiltSmoothing), Mathf.Infinity, Time.unscaledDeltaTime);
             // One world, one downhill direction: the force field and visible tilt are the same rotation.
-            Physics.gravity = GravityDir() * ControlSettings.FallGravity;
+            Physics.gravity = GravityDir() * (ControlSettings.FallGravity * gravityScale);
         }
 
         Vector2 ReadInput()
@@ -93,14 +95,29 @@ namespace Slock
             }
         }
 
+        /// <summary>World gravity for the current tilt. The push goes the way the input points <i>on screen</i>:
+        /// the camera looks down at <see cref="pitch"/>, so the floor's depth axis is foreshortened by sin(pitch),
+        /// and undoing that makes the on-screen corridors and diagonals line up with the mouse. Tilt amount is the
+        /// same in every direction.</summary>
         Vector3 GravityDir()
         {
+            float mag = Mathf.Min(1f, Tilt.magnitude);
+            if (mag < 1e-5f) return Vector3.down;
             var rot = BaseRot;
             var right = Flat(rot * Vector3.right);
             var fwd = Flat(rot * Vector3.forward);
-            float tx = Mathf.Tan(Tilt.x * ControlSettings.MaxTilt * Mathf.Deg2Rad);
-            float ty = Mathf.Tan(Tilt.y * ControlSettings.MaxTilt * Mathf.Deg2Rad);
-            return (Vector3.down + right * tx + fwd * ty).normalized;
+            var dir = (right * Tilt.x + fwd * (Tilt.y / Foreshorten)).normalized;
+            return (Vector3.down + dir * Mathf.Tan(mag * ControlSettings.MaxTilt * Mathf.Deg2Rad)).normalized;
+        }
+
+        float Foreshorten => Mathf.Max(0.2f, Mathf.Sin(pitch * Mathf.Deg2Rad));
+
+        /// <summary>The tilt input direction (unit) that pushes along the floor direction <paramref name="world"/>.</summary>
+        public Vector2 TiltToward(Vector3 world)
+        {
+            var rot = BaseRot;
+            var v = new Vector2(Vector3.Dot(world, Flat(rot * Vector3.right)), Vector3.Dot(world, Flat(rot * Vector3.forward)) * Foreshorten);
+            return v.normalized;
         }
 
         static Vector3 Flat(Vector3 v) { v.y = 0f; return v.normalized; }

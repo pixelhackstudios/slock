@@ -3,7 +3,7 @@ using UnityEngine;
 namespace Slock
 {
     /// <summary>
-    /// Makes a slorm segment wobble like jelly (visual only; the physics never changes):
+    /// Makes the slock (and slorm segments) wobble like jelly (visual only; the physics never changes):
     /// the top sways behind the bottom when the block speeds up, stops or turns, and the whole
     /// block squishes and springs back when it smacks into a wall or lands.
     /// </summary>
