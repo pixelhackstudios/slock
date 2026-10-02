@@ -46,3 +46,6 @@ mono_crash.*
 
 # Downloaded asset zips (the extracted folders are kept)
 /art-work/downloaded-attrbutions/*.zip
+
+# Snag tracer output (rewritten every run)
+snag-trace.log

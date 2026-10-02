@@ -32,6 +32,7 @@ namespace Slock
         const float BaseWidth = 18f, BaseLength = 18f, RampLength = 6f;
         public const float Rise = 1.0f;
         const float SideDrop = 3f;       // how far below its entrance a side room sits
+        const int LaunchTiles = 4;       // a ramp boost launches the slock onto this block past the top
 
         /// <summary>Block size of section <paramref name="index"/> in "resolution units" (60 at the start).</summary>
         public static int BlockOf(int index) => Mathf.Max(MinBlock, BaseBlock - BlockStep * Mathf.Max(0, index));
@@ -96,6 +97,7 @@ namespace Slock
         GameObject gate;
         GameObject checkpoint;
         bool exitSealed;
+        int edgeRoomRow = -1;                              // main-maze row of the side room's doorway in the left wall
 
         /// <summary>A lower bonus area: its own tile grid, mirrored to the left (sign -1) or right (sign +1).</summary>
         class SideRoom
@@ -157,6 +159,7 @@ namespace Slock
             SpawnCheckpoint();
             SpawnPickups(rng, d);
             foreach (var r in rooms) SpawnRoomRewards(r, rng);
+            SpawnPowerups(rng);
             SpawnPellets();
             SpawnWorms(rng, d);
         }
@@ -196,6 +199,10 @@ namespace Slock
                 }
             }
 
+            // A clear corridor runs all the way round just inside the outer wall (main maze only, not side rooms).
+            for (int x = 1; x < W - 1; x++) t[x, 1] = t[x, L - 2] = Tile.Floor;
+            for (int z = 1; z < L - 1; z++) t[1, z] = t[W - 2, z] = Tile.Floor;
+
             // Slorm pen at the centre (Pac-Man style): walls with one opening, slorms start inside.
             CarveSlormPen(t);
 
@@ -205,6 +212,9 @@ namespace Slock
             // If the pen itself cut the only path, open it up rather than trap the player.
             if (DistanceMap(t, new(Center, 0))[Center, L - 1] < 0)
                 ClearSlormPen(t);
+
+            // The climb ramp launches the slock onto the 4th block in: that one is always open floor.
+            t[Center, LaunchTiles - 1] = Tile.Floor;
 
             depth = EdgeDepths(t, rng, 0, W - 1);
             return t;
@@ -378,12 +388,19 @@ namespace Slock
             int k0 = RampTiles + 2 * rng.Next(0, (L - l) / 2 + 1);   // keep row parity aligned with maze cells
             int entrance = 1 + 2 * rng.Next(0, (l - 1) / 2);         // odd, 1..l-2
             int tz = k0 + entrance - RampTiles;                        // main maze row of the opening (odd)
+            // Doorway, and the 4th block in where the ramp's launch lands: always open floor.
             Tiles[0, tz] = Tile.Floor;
+            Tiles[LaunchTiles - 1, tz] = Tile.Floor;
+            edgeRoomRow = tz;
 
             float top = FloorY, bottom = FloorY - SideDrop;
             float xNear = -(Center + 0.5f) * TileSize, xFar = xNear - rampLen * TileSize;
-            AddSideRamp(mb, xFar, xNear, bottom, top, RampTiles + tz, +1f);
             var room = MakeRoom(rng, d, -1, Center + rampLen + 1, k0, w, l, entrance, bottom);
+            var boost = AddSideRamp(mb, xFar, xNear, bottom, top, RampTiles + tz, +1f);
+            boost.top = new Vector3(xNear, top, 0f);
+            boost.landing = TileCenter(LaunchTiles - 1, tz);
+            boost.hop = WallHeight;
+            boost.downStop = KeyCenter(room.Key(1, entrance), bottom); // the room's second block
             AddTiles(mb, room.t, room.depth, room.floorY, room.Key, -1);
         }
 
@@ -391,10 +408,10 @@ namespace Slock
         /// A one-block-wide ramp running along X between <paramref name="x0"/> (height y0) and <paramref name="x1"/> (y1),
         /// on grid row <paramref name="k"/>, with walls either side and a booster that launches the slock toward the top.
         /// </summary>
-        void AddSideRamp(MeshBuilder mb, float x0, float x1, float y0, float y1, int k, float upSign)
+        BoostRamp AddSideRamp(MeshBuilder mb, float x0, float x1, float y0, float y1, int k, float upSign)
         {
             AddSideRampGeometry(mb, x0, x1, y0, y1, k);
-            SpawnSideBoost(x0, x1, y0, y1, k, upSign);
+            return SpawnSideBoost(x0, x1, y0, y1, k, upSign);
         }
 
         /// <summary>Side-ramp prisms only (no booster objects), so the mesh can be rebuilt after a wall breach.</summary>
@@ -408,7 +425,7 @@ namespace Slock
         }
 
         /// <summary>Side-ramp booster trigger + chevrons.</summary>
-        void SpawnSideBoost(float x0, float x1, float y0, float y1, int k, float upSign)
+        BoostRamp SpawnSideBoost(float x0, float x1, float y0, float y1, int k, float upSign)
         {
             float z = Z0 + k * TileSize;
             // Booster: a trigger over the ramp plus glowing chevrons pointing uphill.
@@ -418,7 +435,8 @@ namespace Slock
             var box = go.AddComponent<BoxCollider>();
             box.isTrigger = true;
             box.size = new Vector3(Mathf.Abs(x1 - x0) + TileSize, Mathf.Abs(y1 - y0) + TileSize * 2f, TileSize * 0.9f);
-            go.AddComponent<BoostRamp>().up = new Vector3(upSign, 0f, 0f);
+            var boost = go.AddComponent<BoostRamp>();
+            boost.up = new Vector3(upSign, 0f, 0f);
 
             float slope = Mathf.Atan2(y1 - y0, x1 - x0) * Mathf.Rad2Deg;
             int chevrons = Mathf.Max(2, Mathf.RoundToInt(Mathf.Abs(x1 - x0) / (TileSize * 1.5f)));
@@ -433,6 +451,7 @@ namespace Slock
                     bar.transform.rotation = Quaternion.Euler(0, side * upSign * -35f, slope);
                 }
             }
+            return boost;
         }
 
         // ------------------------------------------------------------------ mesh
@@ -504,7 +523,11 @@ namespace Slock
             var box = go.AddComponent<BoxCollider>();
             box.isTrigger = true;
             box.size = new Vector3(TileSize * 0.9f, Mathf.Abs(FloorY - prevY) + TileSize * 2f, (zB - zA) + TileSize);
-            go.AddComponent<BoostRamp>().up = new Vector3(0f, 0f, 1f);
+            var boost = go.AddComponent<BoostRamp>();
+            boost.up = new Vector3(0f, 0f, 1f);
+            boost.top = new Vector3(0f, FloorY, zB);
+            boost.landing = TileCenter(Center, LaunchTiles - 1);
+            boost.hop = WallHeight;
 
             float slope = Mathf.Atan2(FloorY - prevY, zB - zA) * Mathf.Rad2Deg;
             int chevrons = Mathf.Max(2, Mathf.RoundToInt((zB - zA) / (TileSize * 1.5f)));
@@ -634,6 +657,77 @@ namespace Slock
                 SpawnPickup(Pickup.Kind.Power, MainKey(deadEnds[i].x, deadEnds[i].y), FloorY);
         }
 
+        static readonly Pickup.Kind[] PowerupKinds =
+            { Pickup.Kind.ClearDots, Pickup.Kind.Steel, Pickup.Kind.RefreshSlugs, Pickup.Kind.ExtraSlug, Pickup.Kind.CloseTraps };
+
+        const int PowerupCount = 3;          // powerups out at once in a section
+        const float PowerupRespawn = 10f;    // seconds after one is taken until a new one appears
+        int clearDotsSpawned, closeTrapsSpawned;
+        readonly List<float> powerupDue = new();
+
+        /// <summary>Three random powerups on random open blocks of the main maze.</summary>
+        void SpawnPowerups(System.Random rng)
+        {
+            var spots = PowerupSpots(false);
+            Shuffle(spots, rng);
+            for (int i = 0; i < Mathf.Min(PowerupCount, spots.Count); i++)
+                SpawnPickup(NextPowerupKind(() => rng.Next(PowerupKinds.Length)), MainKey(spots[i].x, spots[i].y), FloorY);
+        }
+
+        /// <summary>A random powerup kind. Clear-the-dots and close-the-traps each come at most once per section
+        /// (respawns included).</summary>
+        Pickup.Kind NextPowerupKind(System.Func<int> roll)
+        {
+            Pickup.Kind kind;
+            do kind = PowerupKinds[roll()];
+            while ((kind == Pickup.Kind.ClearDots && clearDotsSpawned > 0) || (kind == Pickup.Kind.CloseTraps && closeTrapsSpawned > 0));
+            if (kind == Pickup.Kind.ClearDots) clearDotsSpawned++;
+            if (kind == Pickup.Kind.CloseTraps) closeTrapsSpawned++;
+            return kind;
+        }
+
+        /// <summary>Open main-maze blocks a powerup could go on (reachable, not the pen, not taken). With
+        /// <paramref name="cleared"/>, only blocks with no pellet left (somewhere you've already been).</summary>
+        List<Vector2Int> PowerupSpots(bool cleared)
+        {
+            var reach = DistanceMap(Tiles, new Vector2Int(Center, 0));
+            var spots = new List<Vector2Int>();
+            for (int x = 1; x < W - 1; x++)
+            for (int z = 2; z < L - 2; z++)
+            {
+                var k = MainKey(x, z);
+                if (reach[x, z] < 0 || penCells.Contains(new(x, z)) || reserved.Contains(k)) continue;
+                if (cleared && pellets.ContainsKey(k)) continue;
+                spots.Add(new(x, z));
+            }
+            return spots;
+        }
+
+        /// <summary>A powerup here was taken: a new random one appears <see cref="PowerupRespawn"/> seconds later.</summary>
+        public void PowerupTaken(Pickup pickup)
+        {
+            reserved.Remove(KeyAt(pickup.transform.position));
+            powerupDue.Add(Time.time + PowerupRespawn);
+        }
+
+        /// <summary>Spawn any powerups that are due, on a random cleared block away from the slock. Stops once the
+        /// player has left the section.</summary>
+        void RespawnPowerups()
+        {
+            if (exitSealed || powerupDue.Count == 0 || GameManager.I == null) return;
+            var slockKey = KeyAt(GameManager.I.SlockPosition);
+            for (int i = powerupDue.Count - 1; i >= 0; i--)
+            {
+                if (Time.time < powerupDue[i]) continue;
+                var spots = PowerupSpots(true);
+                spots.RemoveAll(c => { var k = MainKey(c.x, c.y); return Mathf.Abs(k.x - slockKey.x) + Mathf.Abs(k.y - slockKey.y) < 3; });
+                if (spots.Count == 0) return; // nowhere yet: try again next frame
+                var c = spots[Random.Range(0, spots.Count)];
+                SpawnPickup(NextPowerupKind(() => Random.Range(0, PowerupKinds.Length)), MainKey(c.x, c.y), FloorY);
+                powerupDue.RemoveAt(i);
+            }
+        }
+
         /// <summary>Deepest spot: a big clock or (rarer) the gate key. Another far spot: a power gem.</summary>
         void SpawnRoomRewards(SideRoom r, System.Random rng)
         {
@@ -692,6 +786,7 @@ namespace Slock
         // Pellet spheres: spin at their own speed and direction, and bob up and down out of step.
         void Update()
         {
+            RespawnPowerups();
             float time = Time.time, amp = 0.06f * TileSize;
             for (int i = floaters.Count - 1; i >= 0; i--)
             {
@@ -725,6 +820,53 @@ namespace Slock
             Destroy(p.go);
             pellets.Remove(key);
             return true;
+        }
+
+        /// <summary>Powerup: remove a random <paramref name="fraction"/> of the uneaten pellets (rounded up). Returns how many.</summary>
+        public int RemovePellets(float fraction)
+        {
+            var keys = new List<Vector2Int>(pellets.Keys);
+            for (int i = keys.Count - 1; i > 0; i--)
+            {
+                int j = Random.Range(0, i + 1);
+                (keys[i], keys[j]) = (keys[j], keys[i]);
+            }
+            int n = Mathf.CeilToInt(keys.Count * fraction);
+            for (int i = 0; i < n; i++)
+            {
+                Destroy(pellets[keys[i]].go);
+                pellets.Remove(keys[i]);
+            }
+            return n;
+        }
+
+        /// <summary>Powerup: fill every hole in this section (main maze and side rooms) with floor, and wall up every
+        /// gap in their outer walls (not the entry, exit or side-room doorway, nor the block <paramref name="slock"/>
+        /// stands on). Pellets on walled-up blocks go too. Returns how many traps were closed.</summary>
+        public int CloseTraps(Vector3 slock)
+        {
+            var standing = KeyAt(slock);
+            int n = Close(Tiles, MainKey, (x, z) => (x == Center && (z == 0 || z == L - 1)) || (x == 0 && z == edgeRoomRow));
+            foreach (var r in rooms) n += Close(r.t, r.Key, (x, z) => x == 0 && z == r.entrance);
+            if (n > 0) RebuildMesh();
+            return n;
+
+            int Close(Tile[,] t, System.Func<int, int, Vector2Int> key, System.Func<int, int, bool> doorway)
+            {
+                int w = t.GetLength(0), l = t.GetLength(1), closed = 0;
+                for (int x = 0; x < w; x++)
+                for (int z = 0; z < l; z++)
+                {
+                    if (t[x, z] == Tile.Void) { t[x, z] = Tile.Floor; closed++; continue; }
+                    bool edge = x == 0 || x == w - 1 || z == 0 || z == l - 1;
+                    var k = key(x, z);
+                    if (!edge || t[x, z] != Tile.Floor || doorway(x, z) || k == standing || reserved.Contains(k)) continue;
+                    t[x, z] = Tile.Wall;
+                    closed++;
+                    if (pellets.TryGetValue(k, out var p)) { Destroy(p.go); pellets.Remove(k); }
+                }
+                return closed;
+            }
         }
 
         /// <summary>The player has gone through: wall the exit up behind them so this section can't be re-entered

@@ -21,6 +21,8 @@ namespace Slock
         const float WormTime = 10f;
         const int PelletPoints = 10, GoldPelletPoints = 30;
         const float ClockTime = 20f;
+        const float SteelDuration = 10f;
+        const float ClearDotsFraction = 0.25f;
         const float WormRespawn = 8f;
         const int ChunksAhead = 2, ChunksBehind = 1;
         const float FallDistance = 5f;
@@ -35,6 +37,7 @@ namespace Slock
         float timeLeft, runSeconds, maxZ, flash;
         int bonusScore, height, pickups, pelletsEaten, wormsEaten, wormChain, pelletsHere;
         float powerUntil;
+        float steelUntil;                   // Slock of Steel: break inner walls and slorms by pushing into them
         int slugs;                          // emergency shots: break one inner wall or kill one slorm
         int slugAllowance;                  // refilled at each gate, one more each time: 3, 4, 5...
         int sealedUpTo = -1;                // sections whose exit has been walled up behind the player
@@ -46,6 +49,8 @@ namespace Slock
 
         public bool PowerActive => state == State.Playing && Time.time < powerUntil;
         public float PowerRemaining => Mathf.Max(0f, powerUntil - Time.time);
+        public Vector3 SlockPosition => slock.transform.position;
+        public bool SteelActive => state == State.Playing && Time.time < steelUntil;
         string endReason = "";
 
         // Game-over / leaderboard entry
@@ -171,7 +176,8 @@ namespace Slock
             timeLeft = StartTime;
             runSeconds = maxZ = 0f;
             bonusScore = height = pickups = pelletsEaten = wormsEaten = wormChain = pelletsHere = 0;
-            powerUntil = 0f;
+            powerUntil = steelUntil = 0f;
+            slock.SetSteel(false);
             slugs = slugAllowance = 3;
             lastAim = new Vector2Int(0, 1);
             popups.Clear();
@@ -310,7 +316,8 @@ namespace Slock
                 previous.SealExit();
                 sealedUpTo = current - 1;
             }
-            EatPellets(p, current);
+            if (!slock.Launching) EatPellets(p, current); // nothing gets eaten mid-hop
+            TickSteel(current);
 
             float floor = MazeChunk.FloorYOf(current);
             if (p.y < floor - FallDistance) { EndRun("You slid off the edge"); return; }
@@ -325,13 +332,37 @@ namespace Slock
                 pelletsEaten++;
                 bonusScore += gold ? GoldPelletPoints : PelletPoints;
                 timeLeft += gold ? GoldPelletTime : PelletTime;
-                if (chunk.PelletsLeft == 0 && !chunk.GateOpen)
-                {
-                    chunk.OpenGate();
-                    Popup("GATE OPEN!", new Color(0.3f, 1f, 0.95f), 1.5f);
-                }
+                CheckGate(chunk);
             }
             pelletsHere = chunk.PelletsLeft;
+        }
+
+        void CheckGate(MazeChunk chunk)
+        {
+            if (chunk.PelletsLeft > 0 || chunk.GateOpen) return;
+            chunk.OpenGate();
+            Popup("GATE OPEN!", new Color(0.3f, 1f, 0.95f), 1.5f);
+        }
+
+        /// <summary>Slock of Steel: push (tilt) into an inner wall block next to you and it breaks. The look blinks
+        /// back to jelly through the last second so the end doesn't catch you out.</summary>
+        void TickSteel(int current)
+        {
+            float left = steelUntil - Time.time;
+            slock.SetSteel(left > 0f && (left > 1f || Mathf.Repeat(left, 0.25f) > 0.125f));
+            if (left <= 0f || !TiltCardinal(out var step) || !chunks.TryGetValue(current, out var chunk) || chunk.Tiles == null) return;
+            var k = chunk.KeyAt(slock.transform.position) + step;
+            if (chunk.TryBlastWall(k.x + chunk.Center, k.y - chunk.RampTiles)) bonusScore += 20;
+        }
+
+        /// <summary>The downhill cardinal (N/E/S/W) of the board's current tilt, if it's tilted enough to count.</summary>
+        bool TiltCardinal(out Vector2Int step)
+        {
+            var g = Physics.gravity;
+            step = Mathf.Abs(g.x) > Mathf.Abs(g.z)
+                ? new Vector2Int(g.x > 0f ? 1 : -1, 0)
+                : new Vector2Int(0, g.z > 0f ? 1 : -1);
+            return rig.Tilt.magnitude >= 0.25f;
         }
 
         // ------------------------------------------------------------------ events from the world
@@ -339,6 +370,7 @@ namespace Slock
         public void OnPickup(Pickup pickup)
         {
             if (state != State.Playing) return;
+            if (pickup.IsPowerup) pickup.GetComponentInParent<MazeChunk>()?.PowerupTaken(pickup);
             switch (pickup.kind)
             {
                 case Pickup.Kind.Clock:
@@ -351,6 +383,34 @@ namespace Slock
                     if (owner != null && !owner.GateOpen) owner.OpenGate();
                     bonusScore += 500;
                     Popup("KEY!  GATE OPEN", new Color(1f, 0.4f, 1f), 1.6f);
+                    return;
+                case Pickup.Kind.ClearDots:
+                    var section = pickup.GetComponentInParent<MazeChunk>();
+                    if (section == null) return;
+                    int gone = section.RemovePellets(ClearDotsFraction);
+                    pelletsHere = section.PelletsLeft;
+                    Popup($"-{gone} DOTS", new Color(0.4f, 0.65f, 1f), 1.4f);
+                    CheckGate(section);
+                    return;
+                case Pickup.Kind.Steel:
+                    steelUntil = Time.time + SteelDuration;
+                    Popup("SLOCK OF STEEL!", new Color(0.85f, 0.88f, 0.95f), 1.4f);
+                    return;
+                case Pickup.Kind.RefreshSlugs:
+                    slugs = Mathf.Max(slugs, slugAllowance);
+                    Popup($"SLUGS REFILLED  x{slugs}", new Color(1f, 0.85f, 0.3f), 1.4f);
+                    return;
+                case Pickup.Kind.ExtraSlug:
+                    slugs++;
+                    Popup($"+1 SLUG  x{slugs}", new Color(1f, 0.85f, 0.3f), 1.4f);
+                    return;
+                case Pickup.Kind.CloseTraps:
+                    var trapped = pickup.GetComponentInParent<MazeChunk>();
+                    if (trapped == null) return;
+                    int closed = trapped.CloseTraps(slock.transform.position);
+                    pelletsHere = trapped.PelletsLeft;
+                    Popup(closed > 0 ? "TRAPS CLOSED" : "NO TRAPS HERE", new Color(0.4f, 1f, 0.45f), 1.4f);
+                    CheckGate(trapped);
                     return;
             }
             int value = 100 + height * 10;
@@ -387,6 +447,7 @@ namespace Slock
         public void OnWormHit(Worm worm, SlockController s)
         {
             if (state != State.Playing || worm.Eaten) return;
+            if (SteelActive) { OnSlugKillWorm(worm, "SMASHED!"); return; }
             if (PowerActive)
             {
                 int pts = 200 << Mathf.Min(wormChain, 3); // 200, 400, 800, 1600
@@ -402,9 +463,12 @@ namespace Slock
                 Popup($"CHOMP! +{pts}   +{WormTime:0}s{back}", new Color(0.4f, 0.6f, 1f), 1.2f);
                 return;
             }
+            // A hit: the slock and the slorm are knocked ~3 tiles apart. Only the first touch in a second costs time;
+            // touching again inside that just bounces them apart again.
+            s.BounceBack(worm.transform.position, 3f);
+            worm.KnockBack(s.transform.position, 3);
             if (wormCooldown.TryGetValue(worm, out var until) && Time.time < until) return;
             wormCooldown[worm] = Time.time + 1f;
-            s.BounceBack(worm.transform.position, 3f);
             float stolen = timeLeft / 3f;
             timeLeft -= stolen;
             worm.stolenTime += stolen;
@@ -431,11 +495,7 @@ namespace Slock
         void UpdateAim()
         {
             // Downhill cardinal of the board's current tilt: the same gravity the slock feels.
-            var g = Physics.gravity;
-            if (rig.Tilt.magnitude >= 0.25f)
-                lastAim = Mathf.Abs(g.x) > Mathf.Abs(g.z)
-                    ? new Vector2Int(g.x > 0f ? 1 : -1, 0)
-                    : new Vector2Int(0, g.z > 0f ? 1 : -1);
+            if (TiltCardinal(out var step)) lastAim = step;
 
             if (aimMark == null)
             {
@@ -493,7 +553,7 @@ namespace Slock
         }
 
         /// <summary>A fired slug killed <paramref name="worm"/>: chain points plus its stolen time back.</summary>
-        public void OnSlugKillWorm(Worm worm)
+        public void OnSlugKillWorm(Worm worm, string shout = "ZAPPED!")
         {
             if (state != State.Playing || worm == null || worm.Eaten) return;
             int pts = 200 << Mathf.Min(wormChain, 3); // 200, 400, 800, 1600
@@ -506,7 +566,7 @@ namespace Slock
             if (refund > 0.05f) timeLeft += refund;
             worm.GetEaten(WormRespawn);
             string back = refund > 0.05f ? $"   +{refund:0}s back" : "";
-            Popup($"ZAPPED! +{pts}   +{WormTime:0}s{back}", new Color(0.4f, 0.6f, 1f), 1.4f);
+            Popup($"{shout} +{pts}   +{WormTime:0}s{back}", new Color(0.4f, 0.6f, 1f), 1.4f);
         }
 
         /// <summary>A fired slug hit a wall block: open it into floor (no pellet, gate count unchanged).</summary>
@@ -588,6 +648,8 @@ namespace Slock
                     new Color(1f, 1f, 1f, 0.7f), TextAnchor.UpperRight);
                 if (PowerActive)
                     Text(new Rect(w / 2 - 200, 112, 400, 30), $"POWER  {PowerRemaining:0.0}", label, new Color(0.45f, 0.6f, 1f), TextAnchor.UpperCenter);
+                if (SteelActive)
+                    Text(new Rect(w / 2 - 200, 140, 400, 30), $"STEEL  {steelUntil - Time.time:0.0}", label, new Color(0.85f, 0.88f, 0.95f), TextAnchor.UpperCenter);
 
                 DrawTiltGauge(new Vector2(80, h - 80), 55f);
 

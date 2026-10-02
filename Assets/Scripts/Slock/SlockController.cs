@@ -103,6 +103,14 @@ namespace Slock
         /// <summary>Shrink (smoothly) to a new block size, e.g. when passing through a gate.</summary>
         public void ShrinkTo(float size) => targetSize = size;
 
+        /// <summary>Slock of Steel look: the jelly turns to polished steel while <paramref name="on"/>.</summary>
+        public void SetSteel(bool on)
+        {
+            var r = visual.GetComponent<MeshRenderer>();
+            var mat = on ? Visuals.Steel : Visuals.SlockJelly;
+            if (r.sharedMaterial != mat) r.sharedMaterial = mat;
+        }
+
         public void SetSizeImmediate(float size)
         {
             targetSize = size;
@@ -176,8 +184,98 @@ namespace Slock
             }
         }
 
+        // Ramp guide (see BoostRamp): braked so it comes to rest no further than a stop point, then it's the player's again.
+        const float GuideBrake = 20f;            // blocks/s^2: how hard it settles toward the stop point
+        bool guiding;
+        Vector3 guideDir, guideStop;
+        float guideSince;
+
+        /// <summary>Moving along <paramref name="dir"/> (horizontal): come to rest no further than <paramref name="stop"/>.</summary>
+        public void Guide(Vector3 dir, Vector3 stop)
+        {
+            if (guiding && guideStop == stop) return;
+            guiding = true;
+            guideDir = dir.normalized;
+            guideStop = stop;
+            guideSince = Time.time;
+        }
+
+        /// <summary>Apply the ramp guide: cap the speed along it so the slock can still stop by the stop point,
+        /// and at the stop point halt it there. Ends there, or once it has stopped or turned off on its own.</summary>
+        void ApplyGuide(ref Vector3 p, ref Vector3 v)
+        {
+            if (!guiding) return;
+            float d = Vector3.Dot(guideStop - p, guideDir);
+            float along = Vector3.Dot(new Vector3(v.x, 0f, v.z), guideDir);
+            if (d <= 0f)
+            {
+                if (along > 0f) v -= guideDir * along;
+                p += guideDir * d;                // click back onto the stop point
+                Body.position = p;
+                Body.linearVelocity = v;
+                guiding = false;
+            }
+            else if (along <= 0.01f && Time.time - guideSince > 0.2f)
+                guiding = false;
+            else
+            {
+                float max = Mathf.Sqrt(2f * GuideBrake * gridTs * d);
+                if (along > max)
+                {
+                    v -= guideDir * (along - max);
+                    Body.linearVelocity = v;
+                }
+            }
+        }
+
+        // Ramp launch (see BoostRamp): a fixed hop from the ramp top to a landing block, clear over walls and holes.
+        const float LaunchDuration = 0.55f;      // seconds in the air
+        bool launching;
+        Vector3 launchFrom, launchTo;
+        float launchT, launchPeak;
+        public bool Launching => launching;
+
+        /// <summary>Hop from here onto the floor block centred at <paramref name="landing"/>, high enough to clear
+        /// <paramref name="clear"/> (a wall). No collisions in the air; on landing it's stopped and back on its rails.</summary>
+        public void Launch(Vector3 landing, float clear)
+        {
+            if (launching) return;
+            launching = true;
+            guiding = false;
+            launchFrom = Body.position;
+            launchTo = new Vector3(landing.x, landing.y + Height * 0.5f + 0.02f, landing.z);
+            launchPeak = (clear + 0.15f * gridTs) / 0.6f; // clears it over the middle of the hop (4t(1-t) >= 0.6)
+            launchT = 0f;
+            Body.detectCollisions = false;
+            Body.useGravity = false;
+            Body.constraints = RigidbodyConstraints.FreezeRotation;
+        }
+
+        void FlyLaunch()
+        {
+            launchT = Mathf.Min(1f, launchT + Time.fixedDeltaTime / LaunchDuration);
+            var p = Vector3.Lerp(launchFrom, launchTo, launchT) + Vector3.up * (launchPeak * 4f * launchT * (1f - launchT));
+            Body.linearVelocity = (p - Body.position) / Time.fixedDeltaTime;
+            Body.position = p;
+            Body.rotation = Quaternion.identity;
+            if (launchT < 1f) return;
+            EndLaunch();
+            var dir = launchTo - launchFrom;
+            travelZ = Mathf.Abs(dir.z) >= Mathf.Abs(dir.x);
+        }
+
+        void EndLaunch()
+        {
+            launching = false;
+            Body.detectCollisions = true;
+            Body.useGravity = true;
+            Body.linearVelocity = Vector3.zero;
+        }
+
         public void ResetTo(Vector3 position)
         {
+            guiding = false;
+            if (launching) EndLaunch();
             Body.position = position;
             Body.rotation = Quaternion.identity;
             transform.SetPositionAndRotation(position, Quaternion.identity);
@@ -218,8 +316,10 @@ namespace Slock
                 ApplySize(Mathf.MoveTowards(Size, targetSize, shrinkSpeed * Time.fixedDeltaTime));
 
             SnagTrace.Flush();
+            if (launching) { FlyLaunch(); return; }
             var p = Body.position;
             var v = Body.linearVelocity;
+            ApplyGuide(ref p, ref v);
 
             // Surface friction (live-tunable from the pause screen); gravity does all the pushing.
             var mat = hullCollider.sharedMaterial;

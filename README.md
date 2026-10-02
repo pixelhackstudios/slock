@@ -46,7 +46,7 @@ You start with **35 seconds**. Keep it topped up:
 
 Green worms that crawl out of the pen in the middle of each section, **one at a time**. There's one more of them in every new section.
 
-- **Touch one and it steals a third of your time** and knocks you back.
+- **Touch one and it steals a third of your time**, and you bounce about 3 tiles apart.
 - **Grab a power gem** and they turn **blue** for 10 seconds (+5 seconds on your clock). Blue Slorms are slow — **eat them** for **+10 seconds**, plus all the time they stole from you.
 
 ### Slugs (emergency only)
@@ -58,6 +58,18 @@ You start with **3 slugs**. Each gate gives back what you used, **plus one more*
 3. **Click** again to fire. A Slorm is destroyed (+10 seconds plus its stolen time) or a wall block is blasted open.
 
 Outer walls can't be broken. A missed shot is still a used slug — save them.
+
+### Powerups
+
+Each section has three powerups scattered at random, and they work the moment you touch them. Ten seconds after you take one, a new one appears somewhere you've already cleared.
+
+| | |
+|---|---|
+| Three blue dots | A quarter of the section's pellets vanish (at most one per section) |
+| Steel block | **Slock of Steel** for 10 seconds: push into an inner wall to smash it, and Slorms you hit are smashed too |
+| Three slugs | Slugs refilled |
+| One big slug | One extra slug |
+| Green patch | Every hole is filled in and every gap in the outer walls is closed off, in the section and its side room (at most one per section) |
 
 ### Gates and sections
 

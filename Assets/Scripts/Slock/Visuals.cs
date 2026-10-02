@@ -5,7 +5,7 @@ namespace Slock
     /// <summary>Runtime-generated textures and materials, so the game needs no authored assets yet.</summary>
     public static class Visuals
     {
-        public static Material FloorTop, WallTop, WallSide, Ramp, SlockBody, SlockJelly, SlockCore, WormJelly, WormScared, WormFlash, Pickup, Pellet, GoldPellet, Clock, Key, Boost, Checkpoint, Gate, AimMark;
+        public static Material FloorTop, WallTop, WallSide, Ramp, SlockBody, SlockJelly, SlockCore, WormJelly, WormScared, WormFlash, Pickup, Pellet, GoldPellet, Clock, Key, Boost, Checkpoint, Gate, AimMark, Steel, Patch;
 
         public static void Init()
         {
@@ -34,6 +34,10 @@ namespace Slock
             Boost = Make(null, new Color(1f, 0.6f, 0.1f), 0.5f, new Color(2f, 0.9f, 0.1f));
             Gate = MakeGlass(new Color(0.1f, 0.8f, 0.8f), new Color(0.05f, 0.7f, 0.7f));
             Checkpoint = Make(null, new Color(0.2f, 1f, 0.95f), 0.5f, new Color(0.2f, 1.6f, 1.5f));
+            // Powerups: Slock of Steel (also worn by the slock while it lasts) and the close-the-holes patch.
+            Steel = Make(null, new Color(0.78f, 0.8f, 0.85f), 0.92f, new Color(0.12f, 0.12f, 0.14f));
+            Steel.SetFloat("_Metallic", 0.9f);
+            Patch = Make(null, new Color(0.35f, 1f, 0.4f), 0.5f, new Color(0.3f, 1.3f, 0.4f));
             defaultGate = new Material(Gate);   // themes without gate art use the glowing glass cube
             int saved = System.Array.IndexOf(TileThemes, PlayerPrefs.GetString(ThemePref, TileThemes[0]));
             SetTileTheme(Mathf.Max(0, saved));
