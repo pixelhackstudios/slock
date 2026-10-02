@@ -16,6 +16,7 @@ export default function Footer() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-4 sm:gap-5 text-xs sm:text-sm text-(--ink-200)">
+          <a href="https://ko-fi.com/pixelhackstudios" target="_blank" rel="noopener noreferrer" className="text-(--gold-300) hover:text-(--gold-200) transition py-1">☕ Support on Ko-fi</a>
           <a href={REPO} target="_blank" rel="noopener noreferrer" className="hover:text-(--ink-50) transition py-1">GitHub</a>
           <a href={`${REPO}/tree/main/slock-web`} target="_blank" rel="noopener noreferrer" className="hover:text-(--ink-50) transition py-1">Website Source</a>
           <span className="badge">MIT · CC BY 4.0</span>

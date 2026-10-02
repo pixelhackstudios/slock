@@ -113,3 +113,7 @@ To just play it in the editor, open `Assets/Scenes/SampleScene` and press **▶ 
 ## Licence
 
 Code: [MIT](LICENSE). Art: [CC BY 4.0](LICENSE-ART.md). Please credit Pixelhack Studios (Scott O'Nanski) — https://www.pixelhackstudios.com
+
+## Support
+
+Slock is free. If you enjoy it and want to help keep it going, you can [buy me a coffee on Ko-fi](https://ko-fi.com/pixelhackstudios) ☕
