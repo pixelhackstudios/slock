@@ -4,6 +4,18 @@
 
 Tilt the world to slide a jelly block through an endless, procedurally generated maze.
 
+## ▶ Download & play
+
+**[Get the latest build from the Releases page](https://github.com/pixelhackstudios/slock/releases/latest)**. It's free, and there's nothing to install.
+
+| | |
+|---|---|
+| **Windows** | Download `Slock-Windows.zip`, extract it, run `Slock.exe` |
+| **Mac** | Download `Slock-Mac.zip`, extract it, then **right-click `Slock.app` → Open** (it isn't signed by Apple yet, so a normal double-click is blocked the first time) |
+| **Linux** | Download `Slock-Linux.tar.gz`, extract it, run `Slock/Slock.x86_64` |
+
+Slock is in early development. If it doesn't start or something breaks, please [open an issue](https://github.com/pixelhackstudios/slock/issues).
+
 ![Slock gameplay](docs/screenshots/gameplay.jpg)
 
 | | |
