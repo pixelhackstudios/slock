@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 export const REPO = 'https://github.com/pixelhackstudios/slock';
 
 // Used until the GitHub API answers (or if it can't be reached).
-const FALLBACK_TAG = 'v0.2.0';
+const FALLBACK_TAG = 'v0.3.0';
 const fallbackUrl = (file) => `${REPO}/releases/download/${FALLBACK_TAG}/${file}`;
 
 export const PLATFORMS = [
