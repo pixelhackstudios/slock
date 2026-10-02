@@ -6,7 +6,7 @@ Tilt the world to slide a jelly block through an endless, procedurally generated
 
 ## ▶ Download & play
 
-**[Get the latest build from the Releases page](https://github.com/pixelhackstudios/slock/releases/latest)**. It's free, and there's nothing to install.
+**[Get the latest build from the Releases page](https://github.com/pixelhackstudios/slock/releases)**. It's free, and there's nothing to install.
 
 | | |
 |---|---|
