@@ -4,6 +4,8 @@
 
 Tilt the world to slide a jelly block through an endless, procedurally generated maze.
 
+**[Visit the Slock website](https://pixelhackstudios.github.io/slock/)** to watch the teaser and try tilting a corridor.
+
 ## ▶ Download & play
 
 **[Get the latest build from the Releases page](https://github.com/pixelhackstudios/slock/releases)**. It's free, and there's nothing to install.
