@@ -5,4 +5,5 @@
 #         before>after); drift = off the rail centre line; spd = speed this step
 # raw_contact: contact as PhysX made it, BEFORE squaring, that pushes along the rail (ccd = continuous sweep)
 # rail_turn: axis switch; carried = speed taken round the corner, from = speed before
-# started 2026-10-01T14:31:05.4878650-06:00
+# started 2026-10-01T17:54:27.4994940-06:00
+0.007	speed_drop	from=13.16 to=0.00 pos=(0.00,1.00) rail=Z
