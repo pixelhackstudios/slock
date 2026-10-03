@@ -1,6 +1,7 @@
 class_name Section
 extends Node3D
-## One map section, drawn by hand: '#' wall, '.' floor, ' ' nothing. The first line is the far end;
+## One map section, drawn by hand: '#' wall, '.' floor with a pellet, 'O' floor with a power pellet, '_' bare
+## floor, 'S' swurm pen floor (where they start), ' ' nothing. The first line is the far end;
 ## the bottom lines are the start corridor (the Unity version's flat entry ramp) and its back wall.
 ## Grid (col, row) sits at world x = (col - centre) * TILE, z = -row * TILE, counting rows up from the
 ## bottom line, so the course runs away from the camera along -Z. Floor top is y = 0; walls are one block tall.
@@ -13,47 +14,57 @@ const TILE := 1.0
 const DEPTH := 1.0 # how far blocks reach below the floor
 
 const LAYOUT: Array[String] = [
-	"#########.#########",
-	"#.......#.....#...#",
+	"#########_#########",
+	"#O......#.....#...#",
 	"#.#####.#.###.#.#.#",
 	"#.#...#...#...#.#.#",
 	"#.#.#.#####.###.#.#",
 	"#...#.......#.....#",
-	"###.#.#####.#.#####",
-	"#...#.#.....#.....#",
-	"#.###.#.###.#####.#",
-	"#.....#...#.......#",
-	"#.#######.#.#####.#",
-	"#.......#.#.#.....#",
+	"###.#.........#####",
+	"#...#..##_###.....#",
+	"#.###..#SSSS#.###.#",
+	"#......#SSSS#.....#",
+	"#.####.######.###.#",
+	"#.................#",
 	"#####.#.#.#.#.###.#",
 	"#.....#...#...#...#",
 	"#.#####.#######.#.#",
 	"#.#.....#.....#.#.#",
 	"#.#.###.#.###.#.#.#",
-	"#...#.......#.....#",
+	"#...#O.....O#.....#",
 	"#########.#########",
-	"        #.#        ",
-	"        #.#        ",
-	"        #.#        ",
-	"        #.#        ",
-	"        #.#        ",
-	"        #.#        ",
+	"        #_#        ",
+	"        #_#        ",
+	"        #_#        ",
+	"        #_#        ",
+	"        #_#        ",
+	"        #_#        ",
 	"        ###        ",
 ]
 
 enum { VOID, FLOOR, WALL }
+enum Eaten { NOTHING, PELLET, POWER }
 enum { SURF_FLOOR, SURF_WALL_SIDE, SURF_WALL_TOP }
 
 var width: int
 var length: int
 var centre: int
 var tiles: Array = [] # tiles[col][row]
+var maze_start := 0  # first row of the maze proper (below it: the start corridor)
+var swurm_homes: Array[Vector2i] = []
+var pellets := {}     # Vector2i(col, row) -> the pellet or power pellet floating over that tile
+var _power := {}      # the tiles in `pellets` that hold power pellets
 
 
 func _ready() -> void:
 	_parse()
 	_build_mesh()
 	_build_collision()
+	_spawn_pellets()
+
+
+func _process(_delta: float) -> void:
+	_float_pellets()
 
 
 ## Where Slock starts: the first tile of the start corridor, resting on the floor.
@@ -72,12 +83,33 @@ func _parse() -> void:
 	width = LAYOUT[0].length()
 	centre = width / 2
 	tiles.resize(width)
+	maze_start = length - 1
+	while maze_start > 0 and not LAYOUT[length - maze_start].contains(" "):
+		maze_start -= 1
 	for col in width:
 		tiles[col] = []
 		tiles[col].resize(length)
 		for row in length:
 			var ch := LAYOUT[length - 1 - row][col]
-			tiles[col][row] = WALL if ch == "#" else (FLOOR if ch == "." else VOID)
+			if ch == "S":
+				swurm_homes.append(Vector2i(col, row))
+			tiles[col][row] = WALL if ch == "#" else (FLOOR if ch in "._OS" else VOID)
+
+
+## Floor centre of a tile, in world space.
+func tile_centre(tile: Vector2i) -> Vector3:
+	return _centre_of(tile.x, tile.y)
+
+
+## Tiles swurms may crawl on: maze floor, away from its outer edge and the entry and exit.
+func is_crawlable(tile: Vector2i) -> bool:
+	return tile_at(tile.x, tile.y) == FLOOR and tile.x > 0 and tile.x < width - 1 \
+		and tile.y > maze_start and tile.y < length - 1
+
+
+## The tile under a world position.
+func tile_under(world: Vector3) -> Vector2i:
+	return Vector2i(roundi(world.x / TILE) + centre, roundi(-world.z / TILE))
 
 
 func _centre_of(col: int, row: int) -> Vector3:
@@ -258,3 +290,103 @@ func _box(body: StaticBody3D, col0: int, col1: int, row0: int, row1: int, y0: fl
 	cs.shape = shape
 	cs.position = Vector3((a.x + b.x) * 0.5, (y0 + y1) * 0.5, (a.z + b.z) * 0.5)
 	body.add_child(cs)
+
+
+# ------------------------------------------------------------------ pellets
+
+const PELLET_RADIUS := 0.115      # world units (0.23 blocks across)
+const PELLET_HEIGHT := 0.3        # centre above the floor
+const PELLET_BOB := 0.06          # bob height
+const POWER_RADIUS := 0.23        # power pellets: big glowing orbs (0.46 blocks across)
+const POWER_HEIGHT := 0.6
+const POWER_BOB := 0.12
+const OUTLINE_PX := 0.5           # black outline width, in screen pixels
+
+var _floats := {} # Vector2i(col, row) -> [home, phase, spin (deg/s), bob speed (rad/s), bob height]
+
+
+func _spawn_pellets() -> void:
+	var pellet_look := _orb(PELLET_RADIUS, Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2))
+	var power_look := _orb(POWER_RADIUS, Color(1.0, 0.85, 0.15, 0.72), Color(1.2, 0.85, 0.1))
+	for row in length:
+		for col in width:
+			var ch := LAYOUT[length - 1 - row][col]
+			var key := Vector2i(col, row)
+			if ch == ".":
+				_floats[key] = [_centre_of(col, row) + Vector3.UP * PELLET_HEIGHT, randf() * 100.0,
+					randf_range(40.0, 140.0) * (1 if randf() < 0.5 else -1), randf_range(1.2, 2.4), PELLET_BOB]
+				pellets[key] = _add_orb(pellet_look)
+			elif ch == "O":
+				_floats[key] = [_centre_of(col, row) + Vector3.UP * POWER_HEIGHT, randf() * 10.0, 120.0, 3.0, POWER_BOB]
+				pellets[key] = _add_orb(power_look)
+				_power[key] = true
+
+
+## A see-through jelly sphere and its outline: a flat ring facing the camera around the sphere's edge
+## (see outline.gdshader). Returns [sphere mesh, ring mesh], shared by every orb of that look.
+func _orb(radius: float, color: Color, glow: Color) -> Array:
+	var sphere := SphereMesh.new()
+	sphere.radius = radius
+	sphere.height = radius * 2.0
+	var jelly := StandardMaterial3D.new()
+	jelly.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	jelly.albedo_color = color
+	jelly.roughness = 0.05
+	jelly.emission_enabled = true
+	jelly.emission = glow
+	sphere.material = jelly
+
+	var ring := QuadMesh.new()
+	var half := radius * 1.6 # room for the ring outside the sphere
+	ring.size = Vector2.ONE * half * 2.0
+	var outline := ShaderMaterial.new()
+	outline.shader = load("res://scripts/outline.gdshader")
+	outline.set_shader_parameter("radius", radius)
+	outline.set_shader_parameter("half_size", half)
+	outline.set_shader_parameter("width_px", OUTLINE_PX)
+	ring.material = outline
+	return [sphere, ring]
+
+
+func _add_orb(look: Array) -> MeshInstance3D:
+	var orb := MeshInstance3D.new()
+	orb.mesh = look[0]
+	orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var edge := MeshInstance3D.new()
+	edge.mesh = look[1]
+	edge.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	orb.add_child(edge)
+	add_child(orb)
+	return orb
+
+
+## Put every pellet back (a restart).
+func reset_pellets() -> void:
+	for pellet in pellets.values():
+		pellet.queue_free()
+	pellets.clear()
+	_power.clear()
+	_floats.clear()
+	_spawn_pellets()
+
+
+## Pellets spin at their own speed and direction, and bob up and down out of step.
+func _float_pellets() -> void:
+	var time := Time.get_ticks_msec() / 1000.0
+	for key in pellets:
+		var pellet: Node3D = pellets[key]
+		var f: Array = _floats[key]
+		var ph: float = f[1] + time
+		pellet.position = f[0] + Vector3.UP * sin(ph * f[3]) * f[4]
+		pellet.rotation_degrees = Vector3(sin(ph * 0.7) * 8.0, ph * f[2], cos(ph * 0.9) * 8.0)
+
+
+## Eat the pellet or power pellet on the tile under `world`, if there is one level with it.
+func try_eat_pellet(world: Vector3) -> Eaten:
+	var key := tile_under(world)
+	var pellet: Node3D = pellets.get(key)
+	if pellet == null or absf(pellet.global_position.y - world.y) > TILE * 1.5:
+		return Eaten.NOTHING
+	pellets.erase(key)
+	pellet.queue_free()
+	return Eaten.POWER if _power.erase(key) else Eaten.PELLET

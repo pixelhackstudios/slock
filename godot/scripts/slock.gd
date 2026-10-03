@@ -70,6 +70,21 @@ func reset_to(pos: Vector3) -> void:
 	reset_physics_interpolation()
 
 
+## Bounce away from `from` hard enough to slide about `tiles` grid blocks, plus a small hop (a swurm hit).
+func bounce_back(from: Vector3, tiles := 3.0) -> void:
+	var away := global_position - from
+	away.y = 0.0
+	if away.length_squared() < 1e-6:
+		away = Vector3(linear_velocity.x, 0, linear_velocity.z)
+	if away.length_squared() < 1e-6:
+		away = Vector3.BACK
+	away = away.normalized()
+	# v = sqrt(2 a d): friction is the only resistance, so this slides ~tiles blocks.
+	var a := maxf(0.5, FRICTION * TiltRig.FALL_GRAVITY)
+	var speed := clampf(sqrt(2.0 * a * tiles * SIZE), 2.5, 12.0)
+	linear_velocity = Vector3(away.x * speed, linear_velocity.y + 2.0, away.z * speed)
+
+
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	var p := state.transform.origin
 	var v := state.linear_velocity
