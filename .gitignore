@@ -49,3 +49,6 @@ mono_crash.*
 
 # Snag tracer output (rewritten every run)
 snag-trace.log
+
+# Godot editor cache (rebuilt automatically when the project opens)
+/godot/.godot/
