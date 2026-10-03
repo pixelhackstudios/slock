@@ -44,7 +44,7 @@ var _respawn_at := 0.0
 
 func _init(home_section: Section, home: Vector2i) -> void:
 	section = home_section
-	_size = Section.TILE
+	_size = home_section.tile
 	_home = home
 	_head = Jelly.new(Vector3.ONE * _size, Jelly.Look.SWURM)
 	_head.wobbles = false # stays an exact one-tile cube
@@ -209,6 +209,6 @@ func _pos(tile: Vector2i) -> Vector3:
 	return section.tile_centre(tile) + Vector3.UP * _size * 0.5
 
 
-## Centre of a block of relative `scale` resting on the floor under `p`.
+## Centre of a block of relative `scale` resting on the floor under `p` (swurms stay in the flat maze).
 func _floor_point(p: Vector3, scale_: float) -> Vector3:
-	return Vector3(p.x, _size * scale_ * 0.5, p.z)
+	return Vector3(p.x, section.floor_y + _size * scale_ * 0.5, p.z)

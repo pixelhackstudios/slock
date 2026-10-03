@@ -1,7 +1,7 @@
 class_name Hud
 extends CanvasLayer
-## The on-screen display: score (top left), remaining time (top centre, blinking red under 10 s), pellets left
-## (top right), the power countdown, pop-up messages, the green flash when a swurm steals time, and the pause
+## The on-screen display: score (top left), remaining time (top centre, blinking red under 10 s), height, pellets
+## left and block size (top right), the power countdown, pop-up messages, the green flash when a swurm steals time, and the pause
 ## and round-over screens. It keeps running while the game is paused.
 
 const RED := Color(1.0, 0.25, 0.33)
@@ -13,6 +13,8 @@ var _font: FontVariation
 var _score: Label
 var _time: Label
 var _pellets: Label
+var _height: Label
+var _block: Label
 var _power: Label
 var _popups: VBoxContainer
 var _flash: ColorRect
@@ -38,7 +40,10 @@ func _init() -> void:
 	_score = _label("0", 52, RED, HORIZONTAL_ALIGNMENT_LEFT, 40)
 	_label("REMAINING TIME", 18, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 20)
 	_time = _label("", 52, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 40)
-	_pellets = _label("", 18, PELLET_CREAM, HORIZONTAL_ALIGNMENT_RIGHT, 20)
+	_label("HEIGHT", 18, CYAN, HORIZONTAL_ALIGNMENT_RIGHT, 20)
+	_height = _label("0", 52, CYAN, HORIZONTAL_ALIGNMENT_RIGHT, 40)
+	_pellets = _label("", 18, PELLET_CREAM, HORIZONTAL_ALIGNMENT_RIGHT, 112)
+	_block = _label("", 18, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_RIGHT, 140)
 	_power = _label("", 18, POWER_BLUE, HORIZONTAL_ALIGNMENT_CENTER, 112)
 
 	_popups = VBoxContainer.new()
@@ -75,7 +80,9 @@ func _ready() -> void:
 
 
 ## Refresh the numbers (every frame).
-func show_status(score: int, time_left: float, pellets_left: int, power_left: float) -> void:
+func show_status(score: int, time_left: float, pellets_left: int, power_left: float, height: int, block: int) -> void:
+	_height.text = str(height)
+	_block.text = "BLOCK  %d" % block
 	_score.text = _thousands(score)
 	_time.text = str(ceili(maxf(0.0, time_left)))
 	var blink := time_left < 10.0 and fmod(_real_time(), 0.5) < 0.25

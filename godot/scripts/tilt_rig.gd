@@ -19,6 +19,8 @@ var pitch := 48.0
 var distance := 20.0
 var follow_smoothing := 0.18
 var look_ahead := 3.0
+var zoom := 1.0                   # distance multiplier, eased in, so the camera closes in as blocks shrink
+var _zoom_now := 1.0
 var input_enabled := true        # off: the board eases back to level (paused, round over)
 var gravity_scale := 1.0          # block size times the section's speed ramp (1 on the first section)
 
@@ -41,6 +43,7 @@ func snap_to_target() -> void:
 	_pivot = target.global_position + Vector3(0, 0, -look_ahead)
 	_pivot_vel = Vector3.ZERO
 	tilt = Vector2.ZERO
+	_zoom_now = zoom
 
 
 func reset_trackball() -> void:
@@ -68,7 +71,8 @@ func _process(delta: float) -> void:
 	_pivot = _follow(goal, delta)
 	var world_tilt := Quaternion(Vector3.DOWN, _gravity_dir())
 	var rot := Basis(world_tilt) * _base_rot()
-	global_transform = Transform3D(rot, _pivot + rot * Vector3(0, 0, distance))
+	_zoom_now = lerpf(_zoom_now, zoom, 1.0 - exp(-2.0 * delta))
+	global_transform = Transform3D(rot, _pivot + rot * Vector3(0, 0, distance * _zoom_now))
 
 
 func _read_input() -> Vector2:

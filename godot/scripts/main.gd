@@ -1,8 +1,10 @@
 extends Node3D
-## One round of Slock on the hand-drawn section. Built in code: lighting, the section, Slock, the swurms, the tilt
-## camera and the HUD. You start with 35 seconds: pellets add time and score, swurms leave their pen one at a
-## time and steal a third of your time when they hit you, unless a power pellet is active: then they're scared
-## and slow, and eating one gives time back. Eat every pellet to open the gate, then reach the exit.
+## A run of Slock: an endless climb through sections (section.gd), each a little higher, with smaller blocks
+## and faster than the last. Built in code: lighting, the sections, Slock, the swurms, the tilt camera and the
+## HUD. You start with 35 seconds: pellets add time and score, swurms leave their pen one at a time and steal a
+## third of your time when they hit you, unless a power pellet is active: then they're scared and slow, and
+## eating one gives time back. Eat every pellet to open the gate, go through for a time bonus, and the climb ramp
+## boosts you up into the next section. The run ends when time runs out (or you slide off the edge).
 ## Mouse (or left stick) tilts the board. Esc pauses, R restarts.
 
 enum State { PLAYING, PAUSED, OVER }
@@ -12,53 +14,69 @@ const PELLET_TIME := 1.0          # seconds each pellet adds
 const POWER_TIME := 5.0           # ... each power pellet
 const SWURM_TIME := 10.0          # ... each scared swurm eaten (plus any time it stole, back)
 const PELLET_POINTS := 10
-const POWER_POINTS := 100
+const POWER_POINTS := 100         # plus 10 per floor climbed
 const SWURM_POINTS := 200         # doubles for each more eaten on the same power pellet, up to 1600
-const CLEAR_POINTS := 250         # reaching the exit
-const PROGRESS_POINTS := 10       # per block of your furthest progress up the course
+const FLOOR_POINTS := 250         # through a gate: this times the floor number
+const PROGRESS_POINTS := 10       # per unit of your furthest progress up the course
+const FALL_DISTANCE := 5.0        # this far below the floor counts as sliding off the edge
 
-const SWURM_COUNT := 4            # Pac-Man: 4 to start
-const SWURM_SPEED := 15.0         # tiles/s
+const SECTIONS_AHEAD := 2         # sections built beyond the one Slock is in ...
+const SECTIONS_BEHIND := 1        # ... and kept behind it
+
 const SWURM_RELEASE_GAP := 4.0    # seconds between swurms leaving the pen
 const SWURM_RESPAWN := 8.0        # seconds after being eaten until it crawls out again
 const POWER_DURATION := 10.0      # seconds a power pellet lasts
 const POWER_FLASH := 2.0          # scared swurms flash white for the last this many seconds
-const HIT_REACH := 0.9            # Slock and a swurm head touch when this close on both axes
+const HIT_REACH := 0.9            # Slock and a swurm head touch when this close on both axes (blocks)
 const HIT_COOLDOWN := 1.0         # a swurm that just hit Slock only knocks it again for that long (no new ouch)
 
-var section: Section
+const BOOST_ACCEL := 80.0         # the climb ramp's booster pushes this hard uphill ...
+const BOOST_SPEED := 15.0         # ... up to this speed, then launches Slock off the top
+
+var sections := {}                # index -> Section
 var slock: Slock
 var rig: TiltRig
 var sounds: Sounds
 var hud: Hud
-var swurms: Array[Swurm] = []
 var state := State.PLAYING
 var now := 0.0                    # game clock, seconds
 var power_until := 0.0
 var time_left := START_TIME
+var current := 0                  # the section Slock is in
+var height := 0                   # floors climbed (gates passed)
 var _hit_until := {}              # swurm -> game time its hit cooldown ends
-var _bonus := 0                   # score from pellets, swurms and the exit
-var _progress := 0.0              # furthest Slock has got up the course (blocks)
+var _bonus := 0                   # score from pellets, swurms and gates
+var _progress := 0.0              # furthest Slock has got up the course
 var _chain := 0                   # swurms eaten on the current power pellet
 var _pellets_eaten := 0
 var _swurms_eaten := 0
 var _run_seconds := 0.0
+var _released := {}               # sections whose swurms have been let out
+var _sealed_up_to := -1           # sections whose exit has been walled up behind Slock
+
+
+## How nasty section `i` is: everything ramps up and then plateaus.
+static func swurm_count(i: int) -> int:
+	return 4 + i                  # Pac-Man: 4 to start, one more per section
+
+
+static func swurm_speed(i: int) -> float:
+	return minf(20.6, 15.0 + i * 0.3) # tiles/s
+
+
+static func time_bonus(i: int) -> float:
+	return maxf(7.0, 18.0 - i * 0.5)
+
+
+static func speed_of(i: int) -> float:
+	return 1.0 + minf(0.6, i * 0.05) # Slock's gravity, in blocks: +5% a section, up to +60%
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS # handles pause; the game itself stops while paused
 	_setup_lighting()
 	sounds = _game(Sounds.new())
-	section = _game(Section.new())
 	slock = _game(Slock.new())
-
-	var homes := section.swurm_homes.duplicate()
-	homes.shuffle()
-	for i in SWURM_COUNT:
-		var swurm := Swurm.new(section, homes[i % homes.size()])
-		swurm.tiles_per_second = SWURM_SPEED
-		swurms.append(_game(swurm))
-
 	rig = TiltRig.new()
 	rig.target = slock
 	_game(rig)
@@ -69,7 +87,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	add_child(hud)
 
-	_start_round()
+	_start_run()
 
 
 ## Adds a node that stops while the game is paused.
@@ -79,17 +97,26 @@ func _game(node: Node) -> Node:
 	return node
 
 
-func _start_round() -> void:
-	section.reset()
-	slock.reset_to(section.start_position(slock.HEIGHT))
-	for swurm in swurms:
-		swurm.reset()
-	_release_swurms()
+func _start_run() -> void:
+	for s in sections.values():
+		s.queue_free()
+	sections.clear()
+	_released.clear()
+	_sealed_up_to = -1
+	current = 0
+	_stream_sections()
+	var first: Section = sections[0]
+	slock.set_size_immediate(first.tile)
+	slock.set_grid(first.tile, first.row_z(0))
+	slock.reset_to(first.start_position(slock.height))
+	rig.zoom = 1.0
+	rig.gravity_scale = slock.size * speed_of(0)
 	rig.reset_trackball()
 	rig.snap_to_target()
 	rig.input_enabled = true
 	time_left = START_TIME
 	power_until = 0.0
+	height = 0
 	_hit_until.clear()
 	_bonus = 0
 	_progress = 0.0
@@ -105,13 +132,13 @@ func _start_round() -> void:
 	hud.popup("GO!", Color.WHITE, 1.0)
 
 
-func _end_round(title: String, title_color: Color) -> void:
+func _end_run(title: String) -> void:
 	state = State.OVER
 	rig.input_enabled = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	hud.show_overlay(title, title_color,
-		"score %s   ·   %d pellets   ·   %d swurms eaten   ·   %ds" % [Hud._thousands(score()), _pellets_eaten,
-		_swurms_eaten, roundi(_run_seconds)],
+	hud.show_overlay(title, Hud.RED,
+		"score %s   ·   floor %d   ·   %d pellets   ·   %d swurms eaten   ·   %ds" % [Hud._thousands(score()), height,
+		_pellets_eaten, _swurms_eaten, roundi(_run_seconds)],
 		"R or Enter to play again")
 
 
@@ -130,18 +157,53 @@ func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo:
 		if key.keycode == KEY_R or (state == State.OVER and key.keycode in [KEY_ENTER, KEY_KP_ENTER]):
-			_start_round()
+			_start_run()
 		elif key.keycode == KEY_ESCAPE and state != State.OVER:
 			_set_paused(state == State.PLAYING)
 	elif event is InputEventMouseButton and event.pressed and state == State.PLAYING:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED # e.g. back after switching windows
 
 
-## Let the swurms out of the pen one at a time, Pac-Man style.
-func _release_swurms() -> void:
-	for i in swurms.size():
-		swurms[i].release_at(now + i * SWURM_RELEASE_GAP)
+# ------------------------------------------------------------------ sections
 
+## Build the sections around the current one and drop the ones far behind.
+func _stream_sections() -> void:
+	for i in range(maxi(0, current - SECTIONS_BEHIND), current + SECTIONS_AHEAD + 1):
+		if not sections.has(i):
+			var s := Section.new(i)
+			_game(s)
+			sections[i] = s
+			var homes := s.swurm_homes.duplicate()
+			homes.shuffle()
+			for k in swurm_count(i):
+				var swurm := Swurm.new(s, homes[k % homes.size()])
+				swurm.tiles_per_second = swurm_speed(i)
+				s.add_child(swurm)
+				s.swurms.append(swurm)
+	for i in sections.keys():
+		if i < current - SECTIONS_BEHIND - 1:
+			sections[i].queue_free()
+			sections.erase(i)
+
+
+## The section whose stretch of the course contains world `z`.
+func _section_at(z: float) -> int:
+	var i := 0
+	while z < Section.near_edge_of(i + 1):
+		i += 1
+	return i
+
+
+## Let a section's swurms out of the pen one at a time, Pac-Man style, the first time Slock arrives.
+func _release_swurms(s: Section) -> void:
+	if _released.has(s.index):
+		return
+	_released[s.index] = true
+	for i in s.swurms.size():
+		s.swurms[i].release_at(now + i * SWURM_RELEASE_GAP)
+
+
+# ------------------------------------------------------------------ frame
 
 func _process(delta: float) -> void:
 	if state == State.PAUSED:
@@ -151,62 +213,115 @@ func _process(delta: float) -> void:
 	if now < power_until:
 		var flashing := power_until - now < POWER_FLASH and fmod(now, 0.3) < 0.15
 		mood = Swurm.Mood.FLASH if flashing else Swurm.Mood.SCARED
-	for swurm in swurms:
-		swurm.mood = mood
-		swurm.tick(delta, now)
+	for s in sections.values():
+		for swurm in s.swurms:
+			swurm.mood = mood
+			swurm.tick(delta, now)
 
+	var here: Section = sections[current]
 	if state == State.PLAYING:
 		time_left -= delta
 		_run_seconds += delta
 		if time_left <= 0.0:
 			time_left = 0.0
-			_end_round("OUT OF TIME", Hud.RED)
-	hud.show_status(score(), time_left, section.pellets.size(), maxf(0.0, power_until - now))
+			_end_run("OUT OF TIME")
+	hud.show_status(score(), time_left, here.pellets.size(), maxf(0.0, power_until - now), height,
+		Section.block_of(height))
 
 
 func _physics_process(_delta: float) -> void:
 	if state != State.PLAYING:
 		return
 	var p := slock.global_position
-	_progress = maxf(_progress, -p.z / Section.TILE)
+	_progress = maxf(_progress, -p.z)
 
-	match section.try_eat_pellet(p):
+	var now_in := _section_at(p.z)
+	if now_in != current:
+		current = now_in
+		_stream_sections()
+	var here: Section = sections[current]
+	slock.set_grid(here.tile, here.row_z(0))
+	rig.gravity_scale = slock.size * speed_of(current) # gravity scales with the block, so speed only ramps
+	_release_swurms(here)
+
+	# Once Slock is fully out of the last section's exit, wall it up: no going back.
+	if current > 0 and _sealed_up_to < current - 1 and p.z + slock.size * 0.5 < here.near_edge:
+		_sealed_up_to = current - 1
+		sections[current - 1].seal_exit()
+
+	if p.y < here.floor_y - FALL_DISTANCE:
+		_end_run("YOU SLID OFF THE EDGE")
+		return
+	if slock.launching:
+		return # nothing gets eaten mid-hop
+	_climb_ramp(here, p)
+
+	match here.try_eat_pellet(p):
 		Section.Eaten.PELLET:
 			sounds.pellet()
 			_pellets_eaten += 1
 			_bonus += PELLET_POINTS
 			time_left += PELLET_TIME
-			_check_gate()
+			_check_gate(here)
 		Section.Eaten.POWER:
 			sounds.pellet()
 			_pellets_eaten += 1
-			_bonus += POWER_POINTS
+			_bonus += POWER_POINTS + height * 10
 			time_left += POWER_TIME
 			power_until = now + POWER_DURATION
 			_chain = 0
 			hud.popup("POWER!   +%ds" % POWER_TIME, Color(1.0, 0.85, 0.2), 1.2)
-			_check_gate()
+			_check_gate(here)
 
-	for swurm in swurms:
+	for swurm in here.swurms:
 		if swurm.eaten:
 			continue
 		var d := p - swurm.head_position()
-		if absf(d.x) >= HIT_REACH or absf(d.z) >= HIT_REACH or absf(d.y) >= Slock.HEIGHT:
+		var reach := HIT_REACH * here.tile
+		if absf(d.x) >= reach or absf(d.z) >= reach or absf(d.y) >= slock.height:
 			continue
 		if now < power_until:
 			_eat_swurm(swurm)
 		else:
 			_swurm_hit(swurm, p)
 
-	if section.gate_open() and section.tile_under(p) == section.exit_tile():
-		_bonus += CLEAR_POINTS
-		_end_round("SECTION CLEARED", Hud.CYAN)
+	if here.gate_open() and height <= here.index and here.tile_under(p) == here.exit_tile():
+		_through_gate(here)
 
 
-func _check_gate() -> void:
-	if section.pellets.is_empty() and not section.gate_open():
-		section.open_gate()
+## The climb ramp's booster: heading uphill it speeds Slock up the ramp, and at the top launches it in a hop
+## onto the 4th tile of the maze. (The first section's start corridor is flat: no booster.)
+func _climb_ramp(here: Section, p: Vector3) -> void:
+	if here.index == 0 or not here.on_ramp(p):
+		return
+	var uphill := slock.linear_velocity.dot(Vector3.FORWARD)
+	if uphill <= 0.3:
+		return
+	if p.z <= here.ramp_top_z():
+		slock.launch(here.tile_centre(here.landing_tile()), here.tile)
+	else:
+		slock.boost = Vector3.FORWARD * BOOST_ACCEL
+		slock.boost_limit = BOOST_SPEED
+
+
+func _check_gate(here: Section) -> void:
+	if here.pellets.is_empty() and not here.gate_open():
+		here.open_gate()
 		hud.popup("GATE OPEN!", Color(0.3, 1.0, 0.95), 1.5)
+
+
+## Through a gate: a floor higher, a time bonus, and the blocks (and Slock) get smaller.
+func _through_gate(here: Section) -> void:
+	var i := here.index
+	height = i + 1
+	_bonus += FLOOR_POINTS * height
+	time_left += time_bonus(i)
+	var next := Section.tile_of(i + 1)
+	slock.shrink_to(minf(slock.size, next))
+	rig.zoom = lerpf(1.0, next, 0.5)
+	hud.popup("FLOOR %d   +%ds" % [height, time_bonus(i)], Color(0.3, 1.0, 0.95), 1.6)
+	if Section.block_of(i + 1) < Section.block_of(i):
+		hud.popup("BLOCK %d" % Section.block_of(i + 1), Color.WHITE, 1.6)
 
 
 ## Touched while scared: eaten. Points double with each one on the same power pellet, and it gives back any
