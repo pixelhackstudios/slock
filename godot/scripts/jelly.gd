@@ -28,6 +28,8 @@ var wobbles := true
 var _material: ShaderMaterial
 var _outline: ShaderMaterial
 var _core: MeshInstance3D
+var _shell: MeshInstance3D
+var _steel: StandardMaterial3D
 var _last_pos := Vector3.ZERO
 var _last_vel := Vector3.ZERO
 var _sway := Vector2.ZERO
@@ -55,6 +57,7 @@ func _init(size: Vector3, look := Look.SLOCK) -> void:
 	jelly.mesh = mesh()
 	jelly.material_override = _material
 	add_child(jelly)
+	_shell = jelly
 	_material.shader = load("res://scripts/jelly.gdshader")
 	_outline = ShaderMaterial.new()
 	_outline.shader = load("res://scripts/jelly_outline.gdshader")
@@ -76,6 +79,17 @@ func _init(size: Vector3, look := Look.SLOCK) -> void:
 	core_mat.emission = Color(0.5, 0.0, 0.05)
 	_core.material_override = core_mat
 	add_child(_core)
+
+
+## Slock of Steel: polished steel instead of jelly while `on` (no wobble, no core, no outline: it's solid).
+func set_steel(on: bool) -> void:
+	if _steel == null:
+		_steel = Section.steel_look()
+	var want: Material = _steel if on else _material
+	if _shell.material_override != want:
+		_shell.material_override = want
+		if _core != null:
+			_core.visible = not on
 
 
 ## The colour (alpha: how see-through) and glow.

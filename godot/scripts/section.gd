@@ -5,7 +5,7 @@ extends Node3D
 ## (see tile_of).
 ##
 ## The maze (main level):           '#' wall  '.' floor with a pellet  'O' power pellet  '_' bare floor
-##                                  'S' swurm pen floor (where they start)
+##                                  'S' swurm pen floor (where they start)  '*' a powerup
 ## The side room (SIDE_DROP lower): '=' wall  ',' floor with a gold pellet  'o' power pellet  '-' bare floor
 ##                                  'C' clock  'K' key
 ## The side ramp between them:      '>' ramp floor  '^' ramp wall (it slopes from the room up to the maze)
@@ -27,7 +27,7 @@ const DEPTH := 1.0                # how far blocks reach below the lowest floor 
 
 enum { VOID, FLOOR, WALL }
 enum Level { MAIN, LOW, CLIMB, SIDE } # the maze, the side room, the climb ramp, the side ramp
-enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY }
+enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY, STEEL, CLEAR_DOTS, CLOSE_TRAPS, REFILL_SLUGS, EXTRA_SLUG }
 enum { SURF_FLOOR, SURF_WALL_SIDE, SURF_WALL_TOP }
 
 var index := 0
@@ -156,6 +156,8 @@ func reset() -> void:
 	_floats.clear()
 	_slots.clear()
 	pellets.clear()
+	_once.clear()
+	_powerups_due.clear()
 	_pellets_left = 0
 	await _spawn_pellets()
 	close_gate()
@@ -212,7 +214,7 @@ func _parse() -> void:
 			var level := Level.MAIN
 			if ch == "#":
 				kind = WALL
-			elif ch in "._OS":
+			elif ch in "._OS*":
 				kind = FLOOR
 			elif ch == "=":
 				kind = WALL
@@ -366,9 +368,26 @@ func _bottom() -> float:
 	return minf(_prev_floor, floor_y) - (SIDE_DROP if has_side_ramp() else 0.0) - DEPTH
 
 
+const STRIP := 8                  # the visible mesh is built in strips this many columns wide, so a change to
+                                  # one tile (a wall blasted, the exit sealed) only rebuilds its strip
+
+var _strips: Array[MeshInstance3D] = []
+var _materials: Array[StandardMaterial3D] = []
+var _faces := [0, 0, 0]           # quads added to each surface of the strip being built
+
+
 func _build_mesh() -> void:
+	_materials = [_material("floor"), _material("walls"), _material("tops")]
+	_strips.resize(ceili(width / float(STRIP)))
+	for i in _strips.size():
+		await _pause()
+		_build_strip(i)
+
+
+## (Re)build the visible mesh of strip `i`.
+func _build_strip(i: int) -> void:
 	var tools := []
-	for i in 3:
+	for k in 3:
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
 		tools.append(st)
@@ -376,8 +395,7 @@ func _build_mesh() -> void:
 	var h := tile * 0.5
 	var bot := _bottom()
 	var side: SurfaceTool = tools[SURF_WALL_SIDE]
-	for col in width:
-		await _pause()
+	for col in range(i * STRIP, mini(width, (i + 1) * STRIP)):
 		for row in length:
 			var kind: int = tiles[col][row]
 			if kind == VOID:
@@ -393,26 +411,31 @@ func _build_mesh() -> void:
 			var fr := Vector3(x1, t[2], z0)
 			var fl := Vector3(x0, t[3], z0)
 			var up := (nr - fl).cross(nl - fr).normalized()
-			_quad(tools[SURF_WALL_TOP if kind == WALL else SURF_FLOOR], fl, fr, nr, nl, up if up.y > 0 else -up)
+			var lid := SURF_WALL_TOP if kind == WALL else SURF_FLOOR
+			_quad(tools[lid], fl, fr, nr, nl, up if up.y > 0 else -up, lid)
 			# A side face shows unless the neighbour is solid and at least as tall along the shared edge.
+			var s := SURF_WALL_SIDE
 			if _shows(col + 1, row, 3, 0, t[2], t[1]):
-				_quad(side, Vector3(x1, bot, z0), fr, nr, Vector3(x1, bot, z1), Vector3.RIGHT)
+				_quad(side, Vector3(x1, bot, z0), fr, nr, Vector3(x1, bot, z1), Vector3.RIGHT, s)
 			if _shows(col - 1, row, 2, 1, t[3], t[0]):
-				_quad(side, Vector3(x0, bot, z0), fl, nl, Vector3(x0, bot, z1), Vector3.LEFT)
+				_quad(side, Vector3(x0, bot, z0), fl, nl, Vector3(x0, bot, z1), Vector3.LEFT, s)
 			if _shows(col, row + 1, 0, 1, t[3], t[2]): # row + 1 is further along -Z
-				_quad(side, Vector3(x0, bot, z0), fl, fr, Vector3(x1, bot, z0), Vector3.FORWARD)
+				_quad(side, Vector3(x0, bot, z0), fl, fr, Vector3(x1, bot, z0), Vector3.FORWARD, s)
 			if _shows(col, row - 1, 3, 2, t[0], t[1]):
-				_quad(side, Vector3(x0, bot, z1), nl, nr, Vector3(x1, bot, z1), Vector3.BACK)
+				_quad(side, Vector3(x0, bot, z1), nl, nr, Vector3(x1, bot, z1), Vector3.BACK, s)
 
 	var mesh := ArrayMesh.new()
-	var materials := [_material("floor"), _material("walls"), _material("tops")]
-	for i in 3:
-		var st: SurfaceTool = tools[i]
-		st.commit(mesh)
-		mesh.surface_set_material(i, materials[i])
+	for k in 3:
+		if _faces[k] > 0: # an empty surface can't be committed
+			tools[k].commit(mesh)
+			mesh.surface_set_material(mesh.get_surface_count() - 1, _materials[k])
+		_faces[k] = 0
+	if _strips[i] != null:
+		_strips[i].queue_free()
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	add_child(mi)
+	_strips[i] = mi
 
 
 ## Whether the side face towards neighbour (col, row) shows: unless the neighbour is solid and its top, at the
@@ -426,7 +449,9 @@ func _shows(col: int, row: int, ca: int, cb: int, ya: float, yb: float) -> bool:
 
 ## One flat quad facing `normal`. UVs put one whole texture on each block face. Tangents (for the tile normal
 ## maps) are set here, the way Godot's generate_tangents() would, but without its cost on the whole mesh.
-func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3) -> void:
+func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3, surface := -1) -> void:
+	if surface >= 0:
+		_faces[surface] += 1
 	# Godot draws clockwise triangles (seen from the front) as front faces.
 	if (b - a).cross(c - a).dot(normal) > 0:
 		var t := b
@@ -475,29 +500,29 @@ func _build_collision() -> void:
 	wall_body.name = "Walls"
 	wall_body.physics_material_override = PhysicsMaterial.new()
 	wall_body.physics_material_override.friction = 0.0
+	_floor_body = floor_body
+	_wall_body = wall_body
 
-	# Each level (maze, side room, climb ramp, side ramp) is built separately, so every slab is one flat or
-	# evenly sloped piece.
+	# Floor: one continuous surface of triangles over every solid tile (walls stand on it, so a blasted wall
+	# has floor ready underneath). Jolt treats the edges between level neighbouring triangles as inside the
+	# surface, so there are no seams to snag on, however ragged the maze (separate boxes for floor strips
+	# snagged where rows of different shapes met).
+	_floor_faces = PackedVector3Array()
+	for col in width:
+		await _pause()
+		for row in length:
+			if tiles[col][row] != VOID:
+				_add_floor_faces(col, row)
+	_floor_shape = CollisionShape3D.new()
+	_floor_shape.shape = ConcavePolygonShape3D.new()
+	_floor_shape.shape.backface_collision = true
+	_floor_shape.shape.set_faces(_floor_faces)
+	floor_body.add_child(_floor_shape)
+
+	# Walls: each level (maze, side room, climb ramp, side ramp) is built separately, so every slab is one flat
+	# or evenly sloped piece.
 	for lvl in Level.values():
-		var solid := func(c: int, r: int) -> bool: return tiles[c][r] != VOID and levels[c][r] == lvl
 		var wall := func(c: int, r: int) -> bool: return tiles[c][r] == WALL and levels[c][r] == lvl
-
-		# Floor: every solid tile has floor under it (walls stand on it). Runs along each row, stacked with
-		# identical runs in the next rows into rectangles.
-		var open := {} # Vector2i(first col, last col) -> first row it started on
-		for row in length + 1:
-			await _pause()
-			var runs := []
-			if row < length:
-				for run in _runs_along_row(row, solid):
-					runs.append(Vector2i(run[0], run[1]))
-			for run in open.keys():
-				if not runs.has(run):
-					_slab(floor_body, run.x, run.y, open[run], row - 1, true)
-					open.erase(run)
-			for run in runs:
-				if not open.has(run):
-					open[run] = row
 
 		# Walls: long runs both ways, overlapping where they cross, so every straight wall face is a single
 		# slab face. A lone block that's in no run gets its own.
@@ -506,20 +531,20 @@ func _build_collision() -> void:
 			await _pause()
 			for run in _runs_along_row(row, wall):
 				if run[1] > run[0]:
-					_slab(wall_body, run[0], run[1], row, row, false)
+					_wall_slab(run[0], run[1], row, row)
 					for col in range(run[0], run[1] + 1):
 						covered[Vector2i(col, row)] = true
 		for col in width:
 			await _pause()
 			for run in _runs_along_col(col, wall):
 				if run[1] > run[0]:
-					_slab(wall_body, col, col, run[0], run[1], false)
+					_wall_slab(col, col, run[0], run[1])
 					for row in range(run[0], run[1] + 1):
 						covered[Vector2i(col, row)] = true
 		for col in width:
 			for row in length:
 				if wall.call(col, row) and not covered.has(Vector2i(col, row)):
-					_slab(wall_body, col, col, row, row, false)
+					_wall_slab(col, col, row, row)
 	add_child(floor_body)
 	add_child(wall_body)
 
@@ -550,9 +575,39 @@ func _runs_along_col(col: int, solid: Callable) -> Array:
 	return runs
 
 
-## A slab over tiles col0..col1, row0..row1 (inclusive, all on one level): the floor under them (from the
-## section's bottom up to the floor) or walls on them (from the floor up one block). Follows any slope.
-func _slab(body: StaticBody3D, col0: int, col1: int, row0: int, row1: int, is_floor: bool) -> void:
+var _floor_body: StaticBody3D
+var _floor_shape: CollisionShape3D
+var _floor_faces: PackedVector3Array
+var _wall_body: StaticBody3D
+var _wall_slabs := {}             # Vector2i(col, row) -> the wall slabs covering that tile
+
+
+## The floor under tile (col, row), as two triangles for the floor's collision surface.
+func _add_floor_faces(col: int, row: int) -> void:
+	var c := Vector3((col - centre) * tile, 0, row_z(row))
+	var h := tile * 0.5
+	var f := _floor_corners(col, row) # near-left, near-right, far-right, far-left
+	var nl := Vector3(c.x - h, f[0], c.z + h)
+	var nr := Vector3(c.x + h, f[1], c.z + h)
+	var fr := Vector3(c.x + h, f[2], c.z - h)
+	var fl := Vector3(c.x - h, f[3], c.z - h)
+	_floor_faces.append_array([fl, fr, nr, fl, nr, nl])
+
+
+## A wall slab over tiles col0..col1, row0..row1, remembered against each tile it covers (to break it up again).
+func _wall_slab(col0: int, col1: int, row0: int, row1: int) -> void:
+	var cs := _slab(_wall_body, col0, col1, row0, row1)
+	cs.set_meta("extent", Rect2i(col0, row0, col1 - col0 + 1, row1 - row0 + 1))
+	for col in range(col0, col1 + 1):
+		for row in range(row0, row1 + 1):
+			if not _wall_slabs.has(Vector2i(col, row)):
+				_wall_slabs[Vector2i(col, row)] = []
+			_wall_slabs[Vector2i(col, row)].append(cs)
+
+
+## A wall slab over tiles col0..col1, row0..row1 (inclusive, all on one level): from the floor up one block.
+## Follows any slope.
+func _slab(body: StaticBody3D, col0: int, col1: int, row0: int, row1: int) -> CollisionShape3D:
 	var x0 := (col0 - centre - 0.5) * tile
 	var x1 := (col1 - centre + 0.5) * tile
 	var z_near := near_edge - (row0 - 1) * tile
@@ -566,19 +621,20 @@ func _slab(body: StaticBody3D, col0: int, col1: int, row0: int, row1: int, is_fl
 		flat = flat and is_equal_approx(c[2], corners[0][2])
 	if flat:
 		var f: float = corners[0][2]
-		var y0 := _bottom() if is_floor else f
-		var y1 := f if is_floor else f + tile
+		var y0 := f
+		var y1 := f + tile
 		cs.shape = BoxShape3D.new()
 		cs.shape.size = Vector3(x1 - x0, y1 - y0, z_near - z_far)
 		cs.position = Vector3((x0 + x1) * 0.5, (y0 + y1) * 0.5, (z_near + z_far) * 0.5)
 	else:
 		var points := PackedVector3Array()
 		for c in corners:
-			points.append(Vector3(c[0], _bottom() if is_floor else c[2], c[1]))
-			points.append(Vector3(c[0], c[2] if is_floor else c[2] + tile, c[1]))
+			points.append(Vector3(c[0], c[2], c[1]))
+			points.append(Vector3(c[0], c[2] + tile, c[1]))
 		cs.shape = ConvexPolygonShape3D.new()
 		cs.shape.points = points
 	body.add_child(cs)
+	return cs
 
 
 ## A booster's markings: orange chevrons pointing uphill from `bottom` to `top` (points on the ramp's centre line).
@@ -609,44 +665,106 @@ func _add_chevrons(bottom: Vector3, top: Vector3) -> void:
 			add_child(piece)
 
 
-## Wall up the exit behind Slock, once it's through: no going back. One wall block, built on its own.
+## Wall up the exit behind Slock, once it's through: no going back.
 func seal_exit() -> void:
 	if _exit_sealed:
 		return
 	_exit_sealed = true
 	open_gate()
 	var e := exit_tile()
-	var c := tile_centre(e)
-	var h := tile * 0.5
-	var top := floor_y + tile
-	var sides := SurfaceTool.new()
-	sides.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var lid := SurfaceTool.new()
-	lid.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var x0 := c.x - h
-	var x1 := c.x + h
-	var z0 := c.z - h
-	var z1 := c.z + h
-	_quad(lid, Vector3(x0, top, z0), Vector3(x1, top, z0), Vector3(x1, top, z1), Vector3(x0, top, z1), Vector3.UP)
-	_quad(sides, Vector3(x0, floor_y, z1), Vector3(x0, top, z1), Vector3(x1, top, z1), Vector3(x1, floor_y, z1), Vector3.BACK)
-	_quad(sides, Vector3(x0, floor_y, z0), Vector3(x0, top, z0), Vector3(x1, top, z0), Vector3(x1, floor_y, z0), Vector3.FORWARD)
-	var mesh := ArrayMesh.new()
-	for pair in [[sides, "walls"], [lid, "tops"]]:
-		pair[0].commit(mesh)
-		mesh.surface_set_material(mesh.get_surface_count() - 1, _material(pair[1]))
-	var block := MeshInstance3D.new()
-	block.mesh = mesh
-	add_child(block)
-	var body := StaticBody3D.new()
-	body.physics_material_override = PhysicsMaterial.new()
-	body.physics_material_override.friction = 0.0
-	var shape := CollisionShape3D.new()
-	shape.shape = BoxShape3D.new()
-	shape.shape.size = Vector3.ONE * tile
-	shape.position = c + Vector3.UP * h
-	body.add_child(shape)
-	add_child(body)
 	tiles[e.x][e.y] = WALL
+	_wall_slab(e.x, e.x, e.y, e.y)
+	_rebuild_strips_near([e])
+
+
+## Rebuild the strips holding these tiles (and the strip next door, for a tile on a strip's edge, whose side
+## faces may change too).
+func _rebuild_strips_near(changed: Array) -> void:
+	var redo := {}
+	for t: Vector2i in changed:
+		for col in [t.x - 1, t.x, t.x + 1]:
+			if col >= 0 and col < width:
+				redo[col / STRIP] = true
+	for i in redo:
+		_build_strip(i)
+
+
+## The maze's inner walls: what slugs and Slock of Steel can break (not its outer walls).
+func is_inner_wall(t: Vector2i) -> bool:
+	return tile_at(t.x, t.y) == WALL and levels[t.x][t.y] == Level.MAIN and t.x > maze_left and t.x < maze_right \
+		and t.y > maze_start and t.y < length - 1
+
+
+## Blast an inner wall block into open floor. False if it isn't one.
+func blast_wall(t: Vector2i) -> bool:
+	if not is_inner_wall(t):
+		return false
+	tiles[t.x][t.y] = FLOOR
+	# Its wall slabs go; what's left of each either side of the gap goes back as new slabs.
+	for cs: CollisionShape3D in _wall_slabs.get(t, []).duplicate():
+		var r: Rect2i = cs.get_meta("extent")
+		for col in range(r.position.x, r.end.x):
+			for row in range(r.position.y, r.end.y):
+				_wall_slabs[Vector2i(col, row)].erase(cs)
+		cs.queue_free()
+		if r.size.x > 1:
+			if t.x > r.position.x:
+				_wall_slab(r.position.x, t.x - 1, t.y, t.y)
+			if t.x < r.end.x - 1:
+				_wall_slab(t.x + 1, r.end.x - 1, t.y, t.y)
+		elif r.size.y > 1:
+			if t.y > r.position.y:
+				_wall_slab(t.x, t.x, r.position.y, t.y - 1)
+			if t.y < r.end.y - 1:
+				_wall_slab(t.x, t.x, t.y + 1, r.end.y - 1)
+	_wall_slabs.erase(t)
+	_rebuild_strips_near([t])
+	return true
+
+
+## The side room's bounds (all its own tiles), or an empty rect without one.
+func _room_rect() -> Rect2i:
+	var r := Rect2i()
+	for col in width:
+		for row in length:
+			if levels[col][row] == Level.LOW and tiles[col][row] != VOID:
+				r = Rect2i(col, row, 1, 1) if r.size == Vector2i.ZERO else r.expand(Vector2i(col, row)).expand(Vector2i(col + 1, row + 1))
+	return r
+
+
+## Powerup: fill every pit in the maze and side room with floor, and wall up every gap in their outer walls (not
+## the entry, exit or side-room doorways, nor the tile at `standing`, nor anything holding a pickup). Pellets on
+## walled-up tiles go too. Returns how many traps were closed.
+func close_traps(standing: Vector2i) -> int:
+	var changed: Array[Vector2i] = []
+	var maze := Rect2i(maze_left, maze_start, maze_right - maze_left + 1, length - maze_start)
+	var room := _room_rect()
+	var doorways: Array[Vector2i] = [Vector2i(centre, maze_start), exit_tile(), standing]
+	if has_side_ramp():
+		doorways.append(Vector2i(_side.y + 1 if _side_rises_right() else _side.x - 1, _side.z))
+		doorways.append(Vector2i(_side.x - 1 if _side_rises_right() else _side.y + 1, _side.z))
+	for area in [[maze, Level.MAIN], [room, Level.LOW]]:
+		var r: Rect2i = area[0]
+		for col in range(r.position.x, r.end.x):
+			for row in range(r.position.y, r.end.y):
+				var t := Vector2i(col, row)
+				if tiles[col][row] == VOID:
+					tiles[col][row] = FLOOR
+					levels[col][row] = area[1]
+					_add_floor_faces(col, row)
+					changed.append(t)
+					continue
+				var edge := col == r.position.x or col == r.end.x - 1 or row == r.position.y or row == r.end.y - 1
+				if not edge or tiles[col][row] != FLOOR or levels[col][row] != area[1] or t in doorways \
+						or (pellets.has(t) and pellets[t] not in [Eaten.PELLET, Eaten.GOLD]):
+					continue
+				tiles[col][row] = WALL
+				_wall_slab(col, col, row, row)
+				_remove_pellet(t)
+				changed.append(t)
+	_floor_shape.shape.set_faces(_floor_faces)
+	_rebuild_strips_near(changed)
+	return changed.size()
 
 
 # ------------------------------------------------------------------ pellets and pickups
@@ -676,7 +794,8 @@ func _spawn_pellets() -> void:
 		Eaten.GOLD: [GOLD_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(1.0, 0.75, 0.1, 0.72), Color(1.3, 0.8, 0.1)],
 		Eaten.POWER: [POWER_RADIUS, PICKUP_HEIGHT, PICKUP_BOB, Color(1.0, 0.85, 0.15, 0.72), Color(1.2, 0.85, 0.1)],
 	}
-	var kind_of := {".": Eaten.PELLET, ",": Eaten.GOLD, "O": Eaten.POWER, "o": Eaten.POWER, "C": Eaten.CLOCK, "K": Eaten.KEY}
+	var kind_of := {".": Eaten.PELLET, ",": Eaten.GOLD, "O": Eaten.POWER, "o": Eaten.POWER, "C": Eaten.CLOCK, "K": Eaten.KEY,
+		"*": Eaten.STEEL} # the kind of powerup is picked as it appears
 	var spots := {} # Eaten -> [Vector2i]
 	for row in length:
 		await _pause()
@@ -687,10 +806,9 @@ func _spawn_pellets() -> void:
 			var key := Vector2i(col, row)
 			pellets[key] = kind
 			if kind in [Eaten.CLOCK, Eaten.KEY]:
-				var home := tile_centre(key) + Vector3.UP * PICKUP_HEIGHT * tile
-				_pickups[key] = _clock() if kind == Eaten.CLOCK else _key()
-				_floats[key] = [home, randf() * 10.0]
-				_heights[key] = home.y
+				_add_pickup(key, kind, _clock() if kind == Eaten.CLOCK else _key())
+			elif kind == Eaten.STEEL:
+				_add_powerup(key)
 			else:
 				_pellets_left += 1
 				if not spots.has(kind):
@@ -729,6 +847,7 @@ func _spawn_pellets() -> void:
 			mm.mesh = mesh
 			mm.instance_count = keys.size()
 			var batch := MultiMeshInstance3D.new()
+			batch.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF # they never move (they bob on the GPU)
 			batch.multimesh = mm
 			batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			add_child(batch)
@@ -747,6 +866,15 @@ func _spawn_pellets() -> void:
 				mm.set_instance_custom_data(n, bob)
 			_slots[key] = [batches[0], batches[1], n]
 			_heights[key] = home.y
+
+
+func _add_pickup(key: Vector2i, kind: Eaten, node: Node3D) -> void:
+	var home := tile_centre(key) + Vector3.UP * PICKUP_HEIGHT * tile
+	pellets[key] = kind
+	_pickups[key] = node
+	_floats[key] = [home, randf() * 10.0]
+	_heights[key] = home.y
+	node.position = home
 
 
 ## The clock (side rooms): a tall glowing cyan crystal.
@@ -787,7 +915,7 @@ static func _glass(color: Color, glow: Color, roughness: float) -> StandardMater
 	return m
 
 
-## Clocks and keys spin and bob.
+## Clocks, keys and powerups spin and bob.
 func _float_pickups() -> void:
 	var time := Time.get_ticks_msec() / 1000.0
 	for key in _pickups:
@@ -808,6 +936,14 @@ func try_eat_pellet(world: Vector3) -> Eaten:
 	if not pellets.has(key) or absf(_heights[key] - world.y) > tile * 1.5:
 		return Eaten.NOTHING
 	var kind: Eaten = pellets[key]
+	_remove_pellet(key)
+	return kind
+
+
+## Take away whatever floats on tile `key` (eaten, cleared, or walled up).
+func _remove_pellet(key: Vector2i) -> void:
+	if not pellets.has(key):
+		return
 	pellets.erase(key)
 	if _slots.has(key):
 		var slot: Array = _slots[key]
@@ -819,7 +955,127 @@ func try_eat_pellet(world: Vector3) -> Eaten:
 		_pickups[key].queue_free()
 		_pickups.erase(key)
 		_floats.erase(key)
-	return kind
+
+
+## Powerup: remove a random `fraction` of the pellets left (rounded up; not power pellets). Returns how many.
+func remove_pellets(fraction: float) -> int:
+	var keys := []
+	for key in pellets:
+		if pellets[key] in [Eaten.PELLET, Eaten.GOLD]:
+			keys.append(key)
+	keys.shuffle()
+	var n := ceili(keys.size() * fraction)
+	for k in n:
+		_remove_pellet(keys[k])
+	return n
+
+
+# ------------------------------------------------------------------ powerups
+
+const POWERUPS: Array[Eaten] = [Eaten.CLEAR_DOTS, Eaten.STEEL, Eaten.REFILL_SLUGS, Eaten.EXTRA_SLUG, Eaten.CLOSE_TRAPS]
+const POWERUP_RESPAWN := 10.0     # seconds after one is taken until a new one appears, somewhere already cleared
+
+var _once := {}                   # clear-the-dots and close-the-traps: at most one of each per section
+var _powerups_due: Array[float] = []
+
+
+func is_powerup(kind: Eaten) -> bool:
+	return kind in POWERUPS
+
+
+## A random powerup on tile `key`: clear-the-dots and close-the-traps come at most once per section.
+func _add_powerup(key: Vector2i) -> void:
+	var kind: Eaten
+	while true:
+		kind = POWERUPS.pick_random()
+		if not _once.has(kind):
+			break
+	if kind in [Eaten.CLEAR_DOTS, Eaten.CLOSE_TRAPS]:
+		_once[kind] = true
+	var node := Node3D.new()
+	add_child(node)
+	var glow := _glass(Color(1.0, 0.6, 0.1, 1.0), Color(2.0, 0.9, 0.1), 0.5) # slugs: orange
+	match kind:
+		Eaten.CLEAR_DOTS: # three blue pellets in a ring
+			for k in 3:
+				var a := k * TAU / 3.0
+				_piece(node, SphereMesh.new(), Vector3(cos(a), 0, sin(a)) * 0.22, Vector3.ONE * 0.2,
+					_glass(Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2), 0.05))
+		Eaten.STEEL: # a shiny steel block
+			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3.ONE * 0.36, steel_look())
+		Eaten.REFILL_SLUGS: # a row of three slugs
+			for k in [-1, 0, 1]:
+				_piece(node, BoxMesh.new(), Vector3(k * 0.2, 0, 0), Vector3.ONE * 0.13, glow)
+		Eaten.EXTRA_SLUG: # one big slug
+			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3.ONE * 0.22, glow)
+		Eaten.CLOSE_TRAPS: # a glowing green floor patch
+			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3(0.46, 0.07, 0.46),
+				_glass(Color(0.35, 1.0, 0.4, 1.0), Color(0.3, 1.3, 0.4), 0.5))
+	_add_pickup(key, kind, node)
+
+
+func _piece(parent: Node3D, mesh: PrimitiveMesh, at: Vector3, size: Vector3, look: Material) -> void:
+	var piece := MeshInstance3D.new()
+	if mesh is SphereMesh:
+		mesh.radius = size.x * 0.5 * tile
+		mesh.height = size.x * tile
+	else:
+		mesh.size = size * tile
+	mesh.material = look
+	piece.mesh = mesh
+	piece.position = at * tile
+	piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(piece)
+
+
+## Polished steel: Slock of Steel's powerup (and Slock while it lasts, see jelly.gd).
+static func steel_look() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.78, 0.8, 0.85)
+	m.metallic = 0.9
+	m.roughness = 0.08
+	m.emission_enabled = true
+	m.emission = Color(0.12, 0.12, 0.14)
+	return m
+
+
+## A powerup was taken here: a new one appears POWERUP_RESPAWN seconds later.
+func powerup_taken(now: float) -> void:
+	_powerups_due.append(now + POWERUP_RESPAWN)
+
+
+## Put out any powerups that are due, on a random tile of the maze that's already been cleared, at least 3 tiles
+## from Slock (at `slock_tile`). Stops once Slock has left the section.
+func respawn_powerups(now: float, slock_tile: Vector2i) -> void:
+	if _exit_sealed or _powerups_due.is_empty() or _powerups_due.min() > now:
+		return
+	var spots := []
+	for t: Vector2i in _reachable():
+		if t.x > maze_left and t.x < maze_right and t.y > maze_start + 1 and t.y < length - 2 and not pellets.has(t) \
+				and _char(t.x, t.y) != "S" and absi(t.x - slock_tile.x) + absi(t.y - slock_tile.y) >= 3:
+			spots.append(t)
+	for i in range(_powerups_due.size() - 1, -1, -1):
+		if _powerups_due[i] > now or spots.is_empty():
+			continue
+		var t: Vector2i = spots.pick_random()
+		spots.erase(t)
+		_add_powerup(t)
+		_powerups_due.remove_at(i)
+
+
+## The maze floor you can walk to from its entry.
+func _reachable() -> Dictionary:
+	var start := Vector2i(centre, maze_start)
+	var seen := {start: true}
+	var queue: Array[Vector2i] = [start]
+	while not queue.is_empty():
+		var c: Vector2i = queue.pop_back()
+		for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var n: Vector2i = c + d
+			if tile_at(n.x, n.y) == FLOOR and levels[n.x][n.y] == Level.MAIN and not seen.has(n):
+				seen[n] = true
+				queue.append(n)
+	return seen
 
 
 # ------------------------------------------------------------------ gate

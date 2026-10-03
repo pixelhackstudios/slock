@@ -15,6 +15,8 @@ var _time: Label
 var _pellets: Label
 var _height: Label
 var _block: Label
+var _slugs: Label
+var _steel: Label
 var _power: Label
 var _popups: VBoxContainer
 var _flash: ColorRect
@@ -45,6 +47,8 @@ func _init() -> void:
 	_pellets = _label("", 18, PELLET_CREAM, HORIZONTAL_ALIGNMENT_RIGHT, 112)
 	_block = _label("", 18, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_RIGHT, 140)
 	_power = _label("", 18, POWER_BLUE, HORIZONTAL_ALIGNMENT_CENTER, 112)
+	_steel = _label("", 18, Color(0.85, 0.88, 0.95), HORIZONTAL_ALIGNMENT_CENTER, 140)
+	_slugs = _label("", 18, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_RIGHT, 168)
 
 	_popups = VBoxContainer.new()
 	_popups.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -89,6 +93,19 @@ func show_status(score: int, time_left: float, pellets_left: int, power_left: fl
 	_time.add_theme_color_override("font_color", RED if blink else Color.WHITE)
 	_pellets.text = "PELLETS LEFT  %d" % pellets_left if pellets_left > 0 else "GATE OPEN"
 	_power.text = "POWER  %.1f" % power_left if power_left > 0.0 else ""
+
+
+## The slug count, or the aiming hint.
+func show_slugs(count: int, aiming: bool) -> void:
+	if aiming:
+		_slugs.text = "AIMING — TILT TO PICK, CLICK TO FIRE"
+	else:
+		_slugs.text = "SLUGS x%d — CLICK TO AIM" % count if count > 0 else "NO SLUGS"
+
+
+## Slock of Steel's countdown.
+func show_steel(left: float) -> void:
+	_steel.text = "STEEL  %.1f" % left if left > 0.0 else ""
 
 
 ## A big message in the middle of the screen for `seconds`, fading out over its last second.

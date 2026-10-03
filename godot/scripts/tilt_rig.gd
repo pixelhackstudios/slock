@@ -62,14 +62,14 @@ func _process(delta: float) -> void:
 	tilt = tilt.lerp(want, 1.0 - exp(-delta / JITTER_FILTER))
 	# One world, one downhill direction: the force field and the visible tilt are the same rotation.
 	var space := get_world_3d().space
-	PhysicsServer3D.area_set_param(space, PhysicsServer3D.AREA_PARAM_GRAVITY_VECTOR, _gravity_dir())
+	PhysicsServer3D.area_set_param(space, PhysicsServer3D.AREA_PARAM_GRAVITY_VECTOR, gravity_dir())
 	PhysicsServer3D.area_set_param(space, PhysicsServer3D.AREA_PARAM_GRAVITY, FALL_GRAVITY * gravity_scale)
 
 	if target == null:
 		return
 	var goal := target.get_global_transform_interpolated().origin + Vector3(0, 0, -look_ahead)
 	_pivot = _follow(goal, delta)
-	var world_tilt := Quaternion(Vector3.DOWN, _gravity_dir())
+	var world_tilt := Quaternion(Vector3.DOWN, gravity_dir())
 	var rot := Basis(world_tilt) * _base_rot()
 	_zoom_now = lerpf(_zoom_now, zoom, 1.0 - exp(-2.0 * delta))
 	global_transform = Transform3D(rot, _pivot + rot * Vector3(0, 0, distance * _zoom_now))
@@ -95,7 +95,7 @@ func _base_rot() -> Basis:
 ## World gravity direction for the current tilt. The push goes the way the input points on screen: the camera
 ## looks down at `pitch`, so the floor's depth axis is foreshortened by sin(pitch), and undoing that makes the
 ## on-screen corridors and diagonals line up with the mouse. Tilt amount is the same in every direction.
-func _gravity_dir() -> Vector3:
+func gravity_dir() -> Vector3:
 	var mag := minf(1.0, tilt.length())
 	if mag < 1e-5:
 		return Vector3.DOWN

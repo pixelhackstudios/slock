@@ -66,6 +66,11 @@ func _init() -> void:
 	set_size_immediate(1.0)
 
 
+## Slock of Steel's look (see jelly.gd).
+func set_steel(on: bool) -> void:
+	_jelly.set_steel(on)
+
+
 ## Snap to a block size (a new run).
 func set_size_immediate(s: float) -> void:
 	_target_size = s

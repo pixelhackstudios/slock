@@ -2,7 +2,7 @@ class_name MazeGen
 ## Generates each section's layout, in the text format section.gd reads (see there for the characters). Ported
 ## from the Unity MazeChunk generator: a maze carved from the entry with a few loops knocked through, open rooms
 ## with pits (some missing an outer wall, so you can slide off), a clear corridor just inside the outer wall, the
-## swurm pen in the middle, power pellets in dead ends, and usually a side room down a ramp off the left wall,
+## swurm pen in the middle, power pellets in dead ends, powerups, and usually a side room down a ramp off the left wall,
 ## holding gold pellets and a clock or a key. Sections keep roughly the same footprint as their blocks shrink, so
 ## each one has more, smaller tiles than the last. The same run seed and section index always give the same layout.
 
@@ -39,6 +39,9 @@ static func swurm_count(i: int) -> int:
 
 static func swurm_speed(i: int) -> float:
 	return minf(20.6, 15.0 + i * 0.3) # tiles/s
+
+
+const POWERUPS := 3                # powerups out at once in a section
 
 
 static func side_room_chance(i: int) -> float:
@@ -165,6 +168,10 @@ static func layout(i: int, seed: int) -> Array[String]:
 	spots.append_array(others)
 	for k in mini(power_pellets(i), spots.size()):
 		marks[spots[k]] = "O"
+	var rest := spots.slice(power_pellets(i))
+	_shuffle(rest, rng)
+	for k in mini(POWERUPS, rest.size()):
+		marks[rest[k]] = "*"
 	for p in pen.keys():
 		marks[p] = pen[p]
 

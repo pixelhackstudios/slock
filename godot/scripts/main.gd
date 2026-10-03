@@ -6,6 +6,8 @@ extends Node3D
 ## eating one gives time back. Eat every pellet (the gold ones down in the side room too) to open the gate, or find
 ## the side room's key; go through for a time bonus, and the climb ramp boosts you up into the next section. The
 ## run ends when time runs out, or you fall down a pit or off an edge.
+## Slugs: click to aim (the game freezes; tilt picks a direction), click again to fire: it kills the first swurm or
+## breaks the first inner wall in its way. Powerups float in each section and come back 10 s after being taken.
 ## Mouse (or left stick) tilts the board. Esc pauses, R restarts.
 
 enum State { PLAYING, PAUSED, OVER }
@@ -36,6 +38,11 @@ const POWER_FLASH := 2.0          # scared swurms flash white for the last this 
 const HIT_REACH := 0.9            # Slock and a swurm head touch when this close on both axes (blocks)
 const HIT_COOLDOWN := 1.0         # a swurm that just hit Slock only knocks it again for that long (no new ouch)
 
+const START_SLUGS := 3            # and one more each gate after that
+const STEEL_DURATION := 10.0      # Slock of Steel: break inner walls and swurms by pushing into them
+const STEEL_WALL_POINTS := 20
+const CLEAR_DOTS_FRACTION := 0.25 # clear-the-dots removes this much of what's left
+
 const BOOST_ACCEL := 80.0         # the climb ramp's booster pushes this hard uphill ...
 const BOOST_SPEED := 15.0         # ... up to this speed, then launches Slock off the top
 
@@ -60,6 +67,14 @@ var _swurms_eaten := 0
 var _run_seconds := 0.0
 var _released := {}               # sections whose swurms have been let out
 var _sealed_up_to := -1           # sections whose exit has been walled up behind Slock
+var slugs := START_SLUGS
+var _slug_allowance := START_SLUGS # refilled to at each gate, one more each time
+var _flying: Array[Slug] = []
+var aiming := false               # slug aim mode: the game is frozen, tilt picks the direction, click fires
+var _aim := Vector2i(0, 1)        # the direction picked (on the grid: +y is up the course)
+var _aim_mark: MeshInstance3D     # translucent red block over what the slug would hit
+var _steel_until := 0.0
+var _run_started := 0             # msec, so the click that starts a run doesn't fire a slug
 
 
 ## How nasty section `i` is (see also MazeGen): everything ramps up and then plateaus.
@@ -85,6 +100,11 @@ func _ready() -> void:
 	add_child(level)
 	hud = Hud.new()
 	add_child(hud)
+	_aim_mark = MeshInstance3D.new()
+	_aim_mark.mesh = BoxMesh.new()
+	_aim_mark.mesh.material = Section._glass(Color(1.0, 0.08, 0.08, 0.45), Color(0.7, 0.0, 0.0), 0.2)
+	_aim_mark.visible = false
+	add_child(_aim_mark)
 
 	_start_run()
 
@@ -124,6 +144,15 @@ func _start_run() -> void:
 	_pellets_eaten = 0
 	_swurms_eaten = 0
 	_run_seconds = 0.0
+	slugs = START_SLUGS
+	_slug_allowance = START_SLUGS
+	for slug in _flying:
+		slug.queue_free()
+	_flying.clear()
+	_set_aiming(false)
+	_steel_until = 0.0
+	slock.set_steel(false)
+	_run_started = Time.get_ticks_msec()
 	state = State.PLAYING
 	get_tree().paused = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -158,10 +187,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key != null and key.pressed and not key.echo:
 		if key.keycode == KEY_R or (state == State.OVER and key.keycode in [KEY_ENTER, KEY_KP_ENTER]):
 			_start_run()
-		elif key.keycode == KEY_ESCAPE and state != State.OVER:
+		elif key.keycode == KEY_ESCAPE and state != State.OVER and not aiming:
 			_set_paused(state == State.PLAYING)
 	elif event is InputEventMouseButton and event.pressed and state == State.PLAYING:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED # e.g. back after switching windows
+		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED # e.g. back after switching windows
+		elif event.button_index == MOUSE_BUTTON_LEFT and Time.get_ticks_msec() - _run_started > 500:
+			_on_fire_click()
 
 
 # ------------------------------------------------------------------ sections
@@ -203,6 +235,10 @@ func _release_swurms(s: Section) -> void:
 func _process(delta: float) -> void:
 	if state == State.PAUSED:
 		return
+	if aiming:
+		_update_aim()
+		hud.show_slugs(slugs, true)
+		return
 	now += delta
 	var mood := Swurm.Mood.NORMAL
 	if now < power_until:
@@ -222,10 +258,12 @@ func _process(delta: float) -> void:
 			_end_run("OUT OF TIME")
 	hud.show_status(score(), time_left, here.pellets_left(), maxf(0.0, power_until - now), height,
 		Section.block_of(height))
+	hud.show_slugs(slugs, false)
+	hud.show_steel(maxf(0.0, _steel_until - now))
 
 
-func _physics_process(_delta: float) -> void:
-	if state != State.PLAYING:
+func _physics_process(delta: float) -> void:
+	if state != State.PLAYING or aiming:
 		return
 	var p := slock.global_position
 	_progress = maxf(_progress, -p.z)
@@ -249,10 +287,13 @@ func _physics_process(_delta: float) -> void:
 	if p.y < here.floor_y - FALL_DISTANCE:
 		_end_run("YOU SLID OFF THE EDGE")
 		return
+	_fly_slugs(delta)
 	if slock.launching:
 		return # nothing gets eaten mid-hop
 	_climb_ramp(here, p)
 	_side_ramp(here, p)
+	_tick_steel(here, p)
+	here.respawn_powerups(now, here.tile_under(p))
 
 	var eaten := here.try_eat_pellet(p)
 	match eaten:
@@ -274,8 +315,12 @@ func _physics_process(_delta: float) -> void:
 			if not here.gate_open():
 				here.open_gate()
 			hud.popup("KEY!  GATE OPEN", Color(1.0, 0.4, 1.0), 1.6)
+		Section.Eaten.STEEL, Section.Eaten.CLEAR_DOTS, Section.Eaten.CLOSE_TRAPS, Section.Eaten.REFILL_SLUGS, \
+				Section.Eaten.EXTRA_SLUG:
+			here.powerup_taken(now)
+			_powerup(eaten, here, p)
 		Section.Eaten.POWER:
-			sounds.pellet()
+			sounds.big_pop()
 			_pellets_eaten += 1
 			_bonus += POWER_POINTS + height * 10
 			time_left += POWER_TIME
@@ -289,9 +334,11 @@ func _physics_process(_delta: float) -> void:
 			continue
 		var d := p - swurm.head_position()
 		var reach := HIT_REACH * here.tile
-		if absf(d.x) >= reach or absf(d.z) >= reach or absf(d.y) >= slock.height:
+		if absf(d.x) >= reach or absf(d.y) >= slock.height or absf(d.z) >= reach:
 			continue
-		if now < power_until:
+		if now < _steel_until:
+			_kill_swurm(swurm, "SMASHED!")
+		elif now < power_until:
 			_eat_swurm(swurm)
 		else:
 			_swurm_hit(swurm, p)
@@ -344,6 +391,9 @@ func _through_gate(here: Section) -> void:
 	height = i + 1
 	_bonus += FLOOR_POINTS * height
 	time_left += time_bonus(i)
+	_slug_allowance += 1 # your slugs back, plus one more
+	slugs = _slug_allowance
+	hud.popup("SLUGS x%d" % slugs, Color(1.0, 0.85, 0.3), 1.6)
 	var next := Section.tile_of(i + 1)
 	slock.shrink_to(minf(slock.size, next))
 	rig.zoom = lerpf(1.0, next, 0.5)
@@ -352,9 +402,14 @@ func _through_gate(here: Section) -> void:
 		hud.popup("BLOCK %d" % Section.block_of(i + 1), Color.WHITE, 1.6)
 
 
-## Touched while scared: eaten. Points double with each one on the same power pellet, and it gives back any
-## time it stole.
+## Touched while scared: eaten.
 func _eat_swurm(swurm: Swurm) -> void:
+	_kill_swurm(swurm, "CHOMP!")
+
+
+## A swurm eaten (or shot, or smashed): points double with each one in a row, up to 1600, and it gives back any
+## time it stole.
+func _kill_swurm(swurm: Swurm, shout: String) -> void:
 	var points := SWURM_POINTS << mini(_chain, 3) # 200, 400, 800, 1600
 	_chain += 1
 	_swurms_eaten += 1
@@ -363,7 +418,126 @@ func _eat_swurm(swurm: Swurm) -> void:
 	time_left += SWURM_TIME + refund
 	swurm.get_eaten(now, SWURM_RESPAWN)
 	var back := "   +%ds back" % roundi(refund) if refund > 0.05 else ""
-	hud.popup("CHOMP! +%d   +%ds%s" % [points, SWURM_TIME, back], Color(0.4, 0.6, 1.0), 1.2)
+	hud.popup("%s +%d   +%ds%s" % [shout, points, SWURM_TIME, back], Color(0.4, 0.6, 1.0), 1.2)
+
+
+# ------------------------------------------------------------------ powerups and slugs
+
+func _powerup(kind: Section.Eaten, here: Section, p: Vector3) -> void:
+	match kind:
+		Section.Eaten.STEEL:
+			sounds.steel()
+			_steel_until = now + STEEL_DURATION
+			hud.popup("SLOCK OF STEEL!", Color(0.85, 0.88, 0.95), 1.4)
+		Section.Eaten.CLEAR_DOTS:
+			sounds.big_pop()
+			hud.popup("-%d DOTS" % here.remove_pellets(CLEAR_DOTS_FRACTION), Color(0.4, 0.65, 1.0), 1.4)
+			_check_gate(here)
+		Section.Eaten.CLOSE_TRAPS:
+			sounds.big_pop()
+			var closed := here.close_traps(here.tile_under(p))
+			hud.popup("TRAPS CLOSED" if closed > 0 else "NO TRAPS HERE", Color(0.4, 1.0, 0.45), 1.4)
+			_check_gate(here)
+		Section.Eaten.REFILL_SLUGS:
+			sounds.slug_reload()
+			slugs = maxi(slugs, _slug_allowance)
+			hud.popup("SLUGS REFILLED  x%d" % slugs, Color(1.0, 0.85, 0.3), 1.4)
+		Section.Eaten.EXTRA_SLUG:
+			sounds.slug_click()
+			slugs += 1
+			hud.popup("+1 SLUG  x%d" % slugs, Color(1.0, 0.85, 0.3), 1.4)
+
+
+## Slock of Steel: push (tilt) into an inner wall next to you and it breaks. The look blinks back to jelly through
+## the last second so the end doesn't catch you out.
+func _tick_steel(here: Section, p: Vector3) -> void:
+	var left := _steel_until - now
+	slock.set_steel(left > 0.0 and (left > 1.0 or fmod(left, 0.25) > 0.125))
+	if left <= 0.0 or rig.tilt.length() < 0.25:
+		return
+	if here.blast_wall(here.tile_under(p) + _tilt_step()):
+		_bonus += STEEL_WALL_POINTS
+
+
+## The grid direction the board slopes down (N/E/S/W): the same gravity Slock feels.
+func _tilt_step() -> Vector2i:
+	var g := rig.gravity_dir()
+	if absf(g.x) > absf(g.z):
+		return Vector2i(1 if g.x > 0.0 else -1, 0)
+	return Vector2i(0, 1 if g.z < 0.0 else -1) # rows run up the course, along -Z
+
+
+## First click: the game freezes in aim mode (no backing out: the slug is committed); tilting picks the direction
+## and the one thing it would hit glows red. Second click fires.
+func _on_fire_click() -> void:
+	if aiming:
+		_fire_slug()
+	elif slugs <= 0:
+		hud.popup("NO SLUG", Color.GRAY, 0.8)
+	else:
+		_set_aiming(true)
+		_update_aim()
+
+
+func _set_aiming(on: bool) -> void:
+	aiming = on
+	get_tree().paused = on
+	rig.process_mode = Node.PROCESS_MODE_ALWAYS if on else Node.PROCESS_MODE_PAUSABLE # tilt still works
+	_aim_mark.visible = false
+
+
+func _update_aim() -> void:
+	if rig.tilt.length() >= 0.25:
+		_aim = _tilt_step()
+	var target := _slug_target()
+	_aim_mark.visible = not target.is_empty()
+	if _aim_mark.visible:
+		_aim_mark.position = target[0]
+		_aim_mark.mesh.size = Vector3.ONE * target[1] * 1.08
+
+
+## The first swurm or inner wall within the slug's range along the aim, walking the grid out from Slock's tile:
+## [centre, size], or empty. Outer walls and a locked gate stop the search (they can't be shot).
+func _slug_target() -> Array:
+	var here: Section = sections[current]
+	var from := here.tile_under(slock.global_position)
+	for i in range(1, Slug.RANGE + 1):
+		var t := from + _aim * i
+		for swurm in here.swurms:
+			if not swurm.eaten and here.tile_under(swurm.head_position()) == t:
+				return [swurm.head_position(), here.tile]
+		if here.tile_at(t.x, t.y) == Section.WALL:
+			if here.is_inner_wall(t):
+				return [here.tile_centre(t) + Vector3.UP * here.tile * 0.5, here.tile]
+			return []
+		if t == here.exit_tile() and not here.gate_open():
+			return []
+	return []
+
+
+func _fire_slug() -> void:
+	_set_aiming(false)
+	slugs -= 1
+	var dir := Vector3(_aim.x, 0, -_aim.y)
+	var slug := Slug.fire(slock.global_position, dir, sections[current])
+	_game(slug)
+	_flying.append(slug)
+
+
+func _fly_slugs(delta: float) -> void:
+	for slug: Slug in _flying.duplicate():
+		var hit: Slug.Hit = slug.step(delta)
+		match hit:
+			Slug.Hit.FLYING:
+				continue
+			Slug.Hit.SWURM:
+				_kill_swurm(slug.swurm_hit, "ZAPPED!")
+			Slug.Hit.WALL:
+				hud.popup("BREACHED!", Color.WHITE, 1.2)
+			Slug.Hit.MISS:
+				hud.popup("MISS...", Color.GRAY, 0.8)
+		_flying.erase(slug)
+		slug.queue_free()
 
 
 ## A hit: Slock and the swurm are knocked ~3 tiles apart, and it steals a third of your time. Still touching
@@ -388,7 +562,15 @@ func _setup_lighting() -> void:
 	env.background_color = Color.BLACK
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.36, 0.36, 0.36) # neutral grey fill
-	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
+	# Reflections: a plain neutral grey all round (the background stays black), so polished things like Slock of
+	# Steel have something to reflect without tinting the tiles.
+	var grey := ProceduralSkyMaterial.new()
+	for prop in ["sky_top_color", "sky_horizon_color", "ground_bottom_color", "ground_horizon_color"]:
+		grey.set(prop, Color(0.3, 0.3, 0.3))
+	grey.sun_angle_max = 0.0
+	env.sky = Sky.new()
+	env.sky.sky_material = grey
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
