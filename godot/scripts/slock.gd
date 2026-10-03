@@ -2,7 +2,7 @@ class_name Slock
 extends RigidBody3D
 ## The sliding block. Tilted gravity pushes; floor friction is the only drag (walls have none). It stays on
 ## tile-centre rails and turns Pac-Man style at centres. Ported from the Unity SlockController, minus ramps,
-## launches, shrinking and the jelly look for now.
+## launches and shrinking for now. Its look and wobble are in jelly.gd.
 
 const SIZE := 1.0                 # one grid block
 const HEIGHT := SIZE * 1.1        # a hair taller than the walls
@@ -40,15 +40,9 @@ func _init() -> void:
 	hull.shape = _rounded_box(SIZE * (1.0 - SHRINK), HEIGHT, 0.08)
 	add_child(hull)
 
-	var body := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(SIZE, HEIGHT, SIZE)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.35, 0.95, 0.55)
-	mat.roughness = 0.3
-	box.material = mat
-	body.mesh = box
-	add_child(body)
+	var jelly := Jelly.new(Vector3(SIZE, HEIGHT, SIZE))
+	jelly.body = self
+	add_child(jelly)
 
 
 ## A box with chamfered corners, so wall corners deflect it instead of snagging like a sharp box would.
