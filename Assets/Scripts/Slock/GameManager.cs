@@ -73,6 +73,7 @@ namespace Slock
         {
             I = this;
             Visuals.Init();
+            Sounds.Init(gameObject);
             ControlSettings.Load();
             playerName = PlayerPrefs.GetString("slock.lastName", "");
 
@@ -332,6 +333,7 @@ namespace Slock
             if (!chunks.TryGetValue(current, out var chunk)) return;
             if (chunk.TryEatPellet(p, out bool gold))
             {
+                Sounds.Pellet();
                 pelletsEaten++;
                 bonusScore += gold ? GoldPelletPoints : PelletPoints;
                 timeLeft += gold ? GoldPelletTime : PelletTime;

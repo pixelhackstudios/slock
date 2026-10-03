@@ -10,7 +10,7 @@ You may share and adapt them for any purpose, including commercially, as long as
 
 - Everything in `art-work/`
 - Everything in `Assets/Textures/`
-- The models and textures in `Assets/Resources/Slock/` (`.fbx` and `.png` files)
+- The models, textures and sounds in `Assets/Resources/Slock/` (`.fbx`, `.png` and `.wav` files)
 
 All other files are source code, covered by the MIT licence in `LICENSE`.
 
