@@ -19,6 +19,7 @@ var pitch := 48.0
 var distance := 20.0
 var follow_smoothing := 0.18
 var look_ahead := 3.0
+var input_enabled := true        # off: the board eases back to level (paused, round over)
 var gravity_scale := 1.0          # block size times the section's speed ramp (1 on the first section)
 
 var tilt := Vector2.ZERO          # current tilt, each axis -1..1 (x = screen right, y = screen up)
@@ -71,6 +72,9 @@ func _process(delta: float) -> void:
 
 
 func _read_input() -> Vector2:
+	if not input_enabled:
+		stick = Vector2.ZERO
+		return stick
 	stick = _trackball
 	var pad := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
 	if pad.length_squared() > 0.0004:

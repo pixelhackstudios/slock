@@ -23,6 +23,7 @@ var section: Section
 var tiles_per_second := 15.0
 var mood := Mood.NORMAL           # set by main.gd each frame
 var eaten := false
+var stolen_time := 0.0            # time it has taken from the player, given back if it's eaten
 
 var _home: Vector2i
 var _from: Vector2i
@@ -58,6 +59,7 @@ func _init(home_section: Section, home: Vector2i) -> void:
 ## Back home in the pen, waiting to be released.
 func reset() -> void:
 	eaten = false
+	stolen_time = 0.0
 	visible = true
 	_release_at = INF
 	_from = _home

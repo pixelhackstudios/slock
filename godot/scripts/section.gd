@@ -61,6 +61,7 @@ func _ready() -> void:
 	_build_mesh()
 	_build_collision()
 	_spawn_pellets()
+	close_gate()
 
 
 func _process(_delta: float) -> void:
@@ -105,6 +106,11 @@ func tile_centre(tile: Vector2i) -> Vector3:
 func is_crawlable(tile: Vector2i) -> bool:
 	return tile_at(tile.x, tile.y) == FLOOR and tile.x > 0 and tile.x < width - 1 \
 		and tile.y > maze_start and tile.y < length - 1
+
+
+## The exit: the gap in the far wall, where the gate sits.
+func exit_tile() -> Vector2i:
+	return Vector2i(LAYOUT[0].find("_"), length - 1)
 
 
 ## The tile under a world position.
@@ -360,14 +366,15 @@ func _add_orb(look: Array) -> MeshInstance3D:
 	return orb
 
 
-## Put every pellet back (a restart).
-func reset_pellets() -> void:
+## Put every pellet back and close the gate (a restart).
+func reset() -> void:
 	for pellet in pellets.values():
 		pellet.queue_free()
 	pellets.clear()
 	_power.clear()
 	_floats.clear()
 	_spawn_pellets()
+	close_gate()
 
 
 ## Pellets spin at their own speed and direction, and bob up and down out of step.
@@ -390,3 +397,44 @@ func try_eat_pellet(world: Vector3) -> Eaten:
 	pellets.erase(key)
 	pellet.queue_free()
 	return Eaten.POWER if _power.erase(key) else Eaten.PELLET
+
+
+# ------------------------------------------------------------------ gate
+
+const GATE_COLOR := Color(0.1, 0.8, 0.8, 0.6) # see-through glowing teal glass
+
+var _gate: StaticBody3D
+
+
+## A solid glowing block in the exit, until every pellet is eaten.
+func close_gate() -> void:
+	if _gate != null:
+		return
+	_gate = StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	shape.shape = BoxShape3D.new()
+	shape.shape.size = Vector3(TILE, TILE * 1.2, TILE)
+	_gate.add_child(shape)
+	var block := MeshInstance3D.new()
+	block.mesh = BoxMesh.new()
+	block.mesh.size = shape.shape.size
+	var glass := StandardMaterial3D.new()
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.albedo_color = GATE_COLOR
+	glass.emission_enabled = true
+	glass.emission = Color(0.05, 0.7, 0.7)
+	glass.roughness = 0.1
+	block.mesh.material = glass
+	_gate.add_child(block)
+	_gate.position = tile_centre(exit_tile()) + Vector3.UP * TILE * 0.6
+	add_child(_gate)
+
+
+func open_gate() -> void:
+	if _gate != null:
+		_gate.queue_free()
+		_gate = null
+
+
+func gate_open() -> bool:
+	return _gate == null
