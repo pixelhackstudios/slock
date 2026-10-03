@@ -3,22 +3,28 @@ extends Node3D
 ## and faster than the last. Built in code: lighting, the sections, Slock, the swurms, the tilt camera and the
 ## HUD. You start with 35 seconds: pellets add time and score, swurms leave their pen one at a time and steal a
 ## third of your time when they hit you, unless a power pellet is active: then they're scared and slow, and
-## eating one gives time back. Eat every pellet to open the gate, go through for a time bonus, and the climb ramp
-## boosts you up into the next section. The run ends when time runs out (or you slide off the edge).
+## eating one gives time back. Eat every pellet (the gold ones down in the side room too) to open the gate, or find
+## the side room's key; go through for a time bonus, and the climb ramp boosts you up into the next section. The
+## run ends when time runs out, or you fall down a pit or off an edge.
 ## Mouse (or left stick) tilts the board. Esc pauses, R restarts.
 
 enum State { PLAYING, PAUSED, OVER }
 
 const START_TIME := 35.0
 const PELLET_TIME := 1.0          # seconds each pellet adds
+const GOLD_TIME := 2.0            # ... each gold pellet (side rooms)
+const CLOCK_TIME := 20.0          # ... the side room's clock
 const POWER_TIME := 5.0           # ... each power pellet
 const SWURM_TIME := 10.0          # ... each scared swurm eaten (plus any time it stole, back)
 const PELLET_POINTS := 10
+const GOLD_POINTS := 30
+const CLOCK_POINTS := 250
+const KEY_POINTS := 500
 const POWER_POINTS := 100         # plus 10 per floor climbed
 const SWURM_POINTS := 200         # doubles for each more eaten on the same power pellet, up to 1600
 const FLOOR_POINTS := 250         # through a gate: this times the floor number
 const PROGRESS_POINTS := 10       # per unit of your furthest progress up the course
-const FALL_DISTANCE := 5.0        # this far below the floor counts as sliding off the edge
+const FALL_DISTANCE := 5.0        # this far below the maze floor counts as falling off (side rooms are 3 below)
 
 const SECTIONS_AHEAD := 2         # sections built beyond the one Slock is in ...
 const SECTIONS_BEHIND := 1        # ... and kept behind it
@@ -225,7 +231,7 @@ func _process(delta: float) -> void:
 		if time_left <= 0.0:
 			time_left = 0.0
 			_end_run("OUT OF TIME")
-	hud.show_status(score(), time_left, here.pellets.size(), maxf(0.0, power_until - now), height,
+	hud.show_status(score(), time_left, here.pellets_left(), maxf(0.0, power_until - now), height,
 		Section.block_of(height))
 
 
@@ -255,14 +261,28 @@ func _physics_process(_delta: float) -> void:
 	if slock.launching:
 		return # nothing gets eaten mid-hop
 	_climb_ramp(here, p)
+	_side_ramp(here, p)
 
-	match here.try_eat_pellet(p):
-		Section.Eaten.PELLET:
+	var eaten := here.try_eat_pellet(p)
+	match eaten:
+		Section.Eaten.PELLET, Section.Eaten.GOLD:
+			var gold := eaten == Section.Eaten.GOLD
 			sounds.pellet()
 			_pellets_eaten += 1
-			_bonus += PELLET_POINTS
-			time_left += PELLET_TIME
+			_bonus += GOLD_POINTS if gold else PELLET_POINTS
+			time_left += GOLD_TIME if gold else PELLET_TIME
 			_check_gate(here)
+		Section.Eaten.CLOCK:
+			sounds.pellet()
+			_bonus += CLOCK_POINTS
+			time_left += CLOCK_TIME
+			hud.popup("+%ds!" % CLOCK_TIME, Color(0.4, 0.9, 1.0), 1.4)
+		Section.Eaten.KEY:
+			sounds.pellet()
+			_bonus += KEY_POINTS
+			if not here.gate_open():
+				here.open_gate()
+			hud.popup("KEY!  GATE OPEN", Color(1.0, 0.4, 1.0), 1.6)
 		Section.Eaten.POWER:
 			sounds.pellet()
 			_pellets_eaten += 1
@@ -304,8 +324,25 @@ func _climb_ramp(here: Section, p: Vector3) -> void:
 		slock.boost_limit = BOOST_SPEED
 
 
+## The side ramp: slide down and it brakes you to a stop just inside the side room; head back up and its
+## booster speeds you up it and launches you onto the 4th tile into the maze.
+func _side_ramp(here: Section, p: Vector3) -> void:
+	if not here.on_side_ramp(p):
+		return
+	var up := here.side_uphill()
+	var uphill := slock.linear_velocity.dot(up)
+	if uphill > 0.3:
+		if p.x * up.x >= here.side_top_x() * up.x:
+			slock.launch(here.side_landing(), here.tile)
+		else:
+			slock.boost = up * BOOST_ACCEL
+			slock.boost_limit = BOOST_SPEED
+	elif uphill < -0.3:
+		slock.guide(-up, here.side_stop())
+
+
 func _check_gate(here: Section) -> void:
-	if here.pellets.is_empty() and not here.gate_open():
+	if here.pellets_left() == 0 and not here.gate_open():
 		here.open_gate()
 		hud.popup("GATE OPEN!", Color(0.3, 1.0, 0.95), 1.5)
 

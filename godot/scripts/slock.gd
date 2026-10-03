@@ -22,6 +22,7 @@ const TURN_SNAP := 14.0           # how fast it slides to a tile centre to take 
 const TURN_BIAS := 1.15           # tilt must favour the other axis by this much to turn (no jitter on diagonals)
 
 const LAUNCH_DURATION := 0.55     # seconds in the air on a ramp launch
+const GUIDE_BRAKE := 20.0         # blocks/s^2: how hard a ramp guide settles it toward its stop point
 
 var size := 1.0                   # one grid block across
 var height := HEIGHT_RATIO
@@ -32,6 +33,10 @@ var grounded := false
 var boost := Vector3.ZERO         # set by the ramp booster each physics frame: extra acceleration uphill
 var boost_limit := 0.0            # ... until it's going this fast uphill
 var launching := false
+var _guiding := false
+var _guide_dir := Vector3.ZERO
+var _guide_stop := Vector3.ZERO
+var _guide_since := 0
 var _target_size := 1.0
 var _hull: CollisionShape3D
 var _jelly: Jelly
@@ -90,12 +95,24 @@ func _physics_process(delta: float) -> void:
 		_apply_size(move_toward(size, _target_size, SHRINK_SPEED * delta))
 
 
+## Sliding down a side ramp along `dir`: braked so it comes to rest no further than `stop`, then it's the
+## player's again.
+func guide(dir: Vector3, stop: Vector3) -> void:
+	if _guiding and _guide_stop == stop:
+		return
+	_guiding = true
+	_guide_dir = dir.normalized()
+	_guide_stop = stop
+	_guide_since = Time.get_ticks_msec()
+
+
 ## Hop from here onto the floor tile centred at `landing`, high enough to clear `clear` (a wall). No collisions
 ## in the air; on landing it's stopped and back on its rails.
 func launch(landing: Vector3, clear: float) -> void:
 	if launching:
 		return
 	launching = true
+	_guiding = false
 	_launch_from = global_position
 	_launch_to = landing + Vector3.UP * (height * 0.5 + 0.02)
 	_launch_peak = (clear + 0.15 * grid) / 0.6 # clears it over the middle of the hop (4t(1-t) >= 0.6)
@@ -126,6 +143,7 @@ static func _rounded_box(w: float, h: float, bevel: float) -> ConvexPolygonShape
 func reset_to(pos: Vector3) -> void:
 	if launching:
 		_end_launch()
+	_guiding = false
 	travel_z = true
 	_set_rail_lock(false, false)
 	PhysicsServer3D.body_set_state(get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, Transform3D(Basis(), pos))
@@ -158,6 +176,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if launching:
 		_fly(state)
 		return
+
+	_apply_guide(state, p, v)
+	p = state.transform.origin
+	v = state.linear_velocity
 
 	# Ramp booster (see main.gd): speeds it uphill, up to a limit.
 	if boost != Vector3.ZERO and Vector3(v.x, 0, v.z).dot(boost.normalized()) < boost_limit:
@@ -231,6 +253,26 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 	state.transform.origin = p
 	state.linear_velocity = Vector3(flat.x, v.y, flat.z)
+
+
+## The side-ramp guide (see guide()): cap the speed along it so it can still stop by the stop point, and at the
+## stop point halt it there. Ends there, or once it has stopped or turned off on its own.
+func _apply_guide(state: PhysicsDirectBodyState3D, p: Vector3, v: Vector3) -> void:
+	if not _guiding:
+		return
+	var d := (_guide_stop - p).dot(_guide_dir)
+	var along := Vector3(v.x, 0, v.z).dot(_guide_dir)
+	if d <= 0.0:
+		if along > 0.0:
+			state.linear_velocity = v - _guide_dir * along
+		state.transform.origin = p + _guide_dir * d # click back onto the stop point
+		_guiding = false
+	elif along <= 0.01 and Time.get_ticks_msec() - _guide_since > 200:
+		_guiding = false
+	else:
+		var most := sqrt(2.0 * GUIDE_BRAKE * grid * d)
+		if along > most:
+			state.linear_velocity = v - _guide_dir * (along - most)
 
 
 ## One step of a launch: a fixed arc from where it took off to the landing tile.
