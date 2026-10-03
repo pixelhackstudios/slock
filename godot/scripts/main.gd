@@ -40,6 +40,7 @@ const BOOST_ACCEL := 80.0         # the climb ramp's booster pushes this hard up
 const BOOST_SPEED := 15.0         # ... up to this speed, then launches Slock off the top
 
 var sections := {}                # index -> Section
+var seed := 0                     # this run's layouts
 var slock: Slock
 var rig: TiltRig
 var sounds: Sounds
@@ -61,15 +62,7 @@ var _released := {}               # sections whose swurms have been let out
 var _sealed_up_to := -1           # sections whose exit has been walled up behind Slock
 
 
-## How nasty section `i` is: everything ramps up and then plateaus.
-static func swurm_count(i: int) -> int:
-	return 4 + i                  # Pac-Man: 4 to start, one more per section
-
-
-static func swurm_speed(i: int) -> float:
-	return minf(20.6, 15.0 + i * 0.3) # tiles/s
-
-
+## How nasty section `i` is (see also MazeGen): everything ramps up and then plateaus.
 static func time_bonus(i: int) -> float:
 	return maxf(7.0, 18.0 - i * 0.5)
 
@@ -107,10 +100,11 @@ func _start_run() -> void:
 	for s in sections.values():
 		s.queue_free()
 	sections.clear()
+	seed = randi_range(1, 1 << 28)
 	_released.clear()
 	_sealed_up_to = -1
 	current = 0
-	_stream_sections()
+	_stream_sections(true)
 	var first: Section = sections[0]
 	slock.set_size_immediate(first.tile)
 	slock.set_grid(first.tile, first.row_z(0))
@@ -172,20 +166,15 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # ------------------------------------------------------------------ sections
 
-## Build the sections around the current one and drop the ones far behind.
-func _stream_sections() -> void:
+## Build the sections around the current one and drop the ones far behind. At the start of a run they're built
+## straight away; after that, new ones (two ahead) build a little each frame so there's no hitch.
+func _stream_sections(at_once := false) -> void:
 	for i in range(maxi(0, current - SECTIONS_BEHIND), current + SECTIONS_AHEAD + 1):
 		if not sections.has(i):
-			var s := Section.new(i)
+			var s := Section.new(i, seed)
+			s.sliced = not at_once
 			_game(s)
 			sections[i] = s
-			var homes := s.swurm_homes.duplicate()
-			homes.shuffle()
-			for k in swurm_count(i):
-				var swurm := Swurm.new(s, homes[k % homes.size()])
-				swurm.tiles_per_second = swurm_speed(i)
-				s.add_child(swurm)
-				s.swurms.append(swurm)
 	for i in sections.keys():
 		if i < current - SECTIONS_BEHIND - 1:
 			sections[i].queue_free()
@@ -246,6 +235,8 @@ func _physics_process(_delta: float) -> void:
 		current = now_in
 		_stream_sections()
 	var here: Section = sections[current]
+	if not here.built:
+		return # still building (only if Slock outran the streaming)
 	slock.set_grid(here.tile, here.row_z(0))
 	rig.gravity_scale = slock.size * speed_of(current) # gravity scales with the block, so speed only ramps
 	_release_swurms(here)

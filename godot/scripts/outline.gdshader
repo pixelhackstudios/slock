@@ -10,8 +10,10 @@ uniform float width_px = 2.0;
 uniform vec4 color : source_color = vec4(0.0, 0.0, 0.0, 1.0);
 
 void vertex() {
-	// Face the camera, ignoring the node's own spin.
-	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
+	// Face the camera, ignoring the node's own spin, and bob with the orb (batched orbs carry their bob in
+	// INSTANCE_CUSTOM: phase, speed, height; see orb.gdshader).
+	vec4 centre = MODEL_MATRIX[3] + vec4(0.0, sin((TIME + INSTANCE_CUSTOM.x) * INSTANCE_CUSTOM.y) * INSTANCE_CUSTOM.z, 0.0, 0.0);
+	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], centre);
 }
 
 void fragment() {

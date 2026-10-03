@@ -1,8 +1,8 @@
 class_name Section
 extends Node3D
-## One section of the course, drawn by hand. The first line is the far end. Sections are laid end to end along -Z,
-## each RISE higher than the last, and each with blocks a little smaller (see tile_of): the same layout, at a finer
-## and finer grid.
+## One section of the course. Its layout comes from maze_gen.gd as lines of text, the first line the far end.
+## Sections are laid end to end along -Z, each RISE higher than the last, and each with blocks a little smaller
+## (see tile_of).
 ##
 ## The maze (main level):           '#' wall  '.' floor with a pellet  'O' power pellet  '_' bare floor
 ##                                  'S' swurm pen floor (where they start)
@@ -25,41 +25,13 @@ const RISE := 1.0                 # each section's floor is this much higher tha
 const SIDE_DROP := 3.0            # how far below the maze a side room sits
 const DEPTH := 1.0                # how far blocks reach below the lowest floor of a section
 
-const LAYOUT: Array[String] = [
-	"             #########_#########",
-	"             #O......#.....#...#",
-	"             #.#####.#.###.#.#.#",
-	"             #.#...#...#...#.#.#",
-	"             #.#.#.#####.###.#.#",
-	"=========    #...#.......#.....#",
-	"=,,,,,,,=    ###.#.........#####",
-	"=,=,= =,=    #...#..##_###.....#",
-	"=,,,o,,,=^^^^#.###..#SSSS#.###.#",
-	",,=,=,=,->>>>.......#SSSS#.....#",
-	"=,,,,,=,=^^^^#.####.######.###.#",
-	" ,=,=C,,=    #.................#",
-	"=,,,,,,,=    #####.#.#.#.#.###.#",
-	"=========    #.....#...#...#...#",
-	"             #.#####.#######.#.#",
-	"             #.#.....#.....#.#.#",
-	"             #.#.###.#.###.#.#.#",
-	"             #...#O.....O#.....#",
-	"             #########.#########",
-	"                     #_#        ",
-	"                     #_#        ",
-	"                     #_#        ",
-	"                     #_#        ",
-	"                     #_#        ",
-	"                     #_#        ",
-	"                     ###        ",
-]
-
 enum { VOID, FLOOR, WALL }
 enum Level { MAIN, LOW, CLIMB, SIDE } # the maze, the side room, the climb ramp, the side ramp
 enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY }
 enum { SURF_FLOOR, SURF_WALL_SIDE, SURF_WALL_TOP }
 
 var index := 0
+var layout: Array[String]         # see the characters above
 var tile := 1.0                   # block size in this section
 var floor_y := 0.0                # maze floor height
 var near_edge := 0.0              # world z of the start of the climb ramp (row 1's near edge)
@@ -73,12 +45,18 @@ var tiles: Array = []             # tiles[col][row]: VOID, FLOOR or WALL
 var levels: Array = []            # levels[col][row]: Level
 var swurm_homes: Array[Vector2i] = []
 var swurms: Array[Swurm] = []
-var pellets := {}                 # Vector2i(col, row) -> the pellet, power pellet, clock or key floating there
-var _kinds := {}                  # ... and what it is (Eaten)
+var pellets := {}                 # Vector2i(col, row) -> what floats there (Eaten): pellet, power pellet, clock, key
 var _prev_floor := 0.0            # where the climb ramp starts from: the previous section's floor
 var _side := Vector3i(-1, -1, -1) # the side ramp: first col, last col, row (-1: none)
-var _built: Array[Node] = []      # the mesh and collision bodies, rebuilt when the exit is sealed
 var _exit_sealed := false
+var sliced := false               # build a little each frame (sections streamed in ahead), not all at once
+var built := false                # finished building: safe to play on
+var _seed := 0
+var _slice_from := 0
+
+const SLICE_USEC := 3000          # building a sliced section takes at most this much of a frame
+
+signal _frame
 
 
 ## Block size of section `i` (1 at the start).
@@ -95,22 +73,34 @@ static func block_of(i: int) -> int:
 static func near_edge_of(i: int) -> float:
 	var z := -0.5
 	for k in i:
-		z -= (LAYOUT.size() - 1) * tile_of(k)
+		z -= (MazeGen.rows_of(k) - 1) * tile_of(k)
 	return z
 
 
-func _init(section_index: int) -> void:
+## Section `i` of the run with this seed. It generates and builds itself once it's in the scene.
+func _init(section_index: int, seed: int) -> void:
 	index = section_index
+	_seed = seed
 	tile = tile_of(index)
 	floor_y = index * RISE
 	_prev_floor = maxf(0.0, floor_y - RISE)
 	near_edge = near_edge_of(index)
-	_parse()
 
 
 func _ready() -> void:
-	_build()
-	reset()
+	_slice_from = Time.get_ticks_usec()
+	if sliced: # generate on another thread while the game runs on
+		var task := WorkerThreadPool.add_task(func(): layout = MazeGen.layout(index, _seed))
+		while not WorkerThreadPool.is_task_completed(task):
+			await _frame
+		WorkerThreadPool.wait_for_task_completion(task)
+		_slice_from = Time.get_ticks_usec()
+	else:
+		layout = MazeGen.layout(index, _seed)
+	_parse()
+	await _build_mesh()
+	await _build_collision()
+	await reset()
 	if index > 0:
 		_add_chevrons(Vector3(0, _prev_floor, near_edge), Vector3(0, floor_y, ramp_top_z()))
 	if has_side_ramp():
@@ -122,20 +112,52 @@ func _ready() -> void:
 			_add_chevrons(left, right)
 		else:
 			_add_chevrons(right, left)
+	_add_swurms()
+	built = true
+
+
+## While building sliced: carry on next frame once this frame's share is used up. (The frame check matters: a
+## section that pauses while _frame is going out would otherwise be woken by that same emission.)
+func _pause() -> void:
+	if sliced and Time.get_ticks_usec() - _slice_from > SLICE_USEC:
+		var frame := Engine.get_process_frames()
+		while Engine.get_process_frames() == frame:
+			await _frame
+		_slice_from = Time.get_ticks_usec()
 
 
 func _process(_delta: float) -> void:
-	_float_pellets()
+	_frame.emit()
+	_float_pickups()
+
+
+## The section's swurms, at home in its pen (or, with no room for a pen, anywhere well clear of the entry).
+func _add_swurms() -> void:
+	var homes := swurm_homes.duplicate()
+	if homes.is_empty():
+		for col in width:
+			for row in range(maze_start + 5, length - 2):
+				if is_crawlable(Vector2i(col, row)):
+					homes.append(Vector2i(col, row))
+	homes.shuffle()
+	for k in MazeGen.swurm_count(index):
+		var swurm := Swurm.new(self, homes[k % homes.size()])
+		swurm.tiles_per_second = MazeGen.swurm_speed(index)
+		add_child(swurm)
+		swurms.append(swurm)
 
 
 ## Put every pellet and pickup back and close the gate (a new run).
 func reset() -> void:
-	for pellet in pellets.values():
-		pellet.queue_free()
-	pellets.clear()
-	_kinds.clear()
+	for n in _orb_batches + _pickups.values():
+		n.queue_free()
+	_orb_batches.clear()
+	_pickups.clear()
 	_floats.clear()
-	_spawn_pellets()
+	_slots.clear()
+	pellets.clear()
+	_pellets_left = 0
+	await _spawn_pellets()
 	close_gate()
 
 
@@ -161,18 +183,18 @@ func tile_at(col: int, row: int) -> int:
 
 
 func _char(col: int, row: int) -> String:
-	var line := LAYOUT[length - 1 - row]
+	var line := layout[length - 1 - row]
 	return line[col] if col < line.length() else " "
 
 
 func _parse() -> void:
-	length = LAYOUT.size()
+	length = layout.size()
 	width = 0
-	for line in LAYOUT:
+	for line in layout:
 		width = maxi(width, line.length())
-	centre = LAYOUT[0].find("_")
-	maze_left = LAYOUT[0].find("#")
-	maze_right = LAYOUT[0].rfind("#")
+	centre = layout[0].find("_")
+	maze_left = layout[0].find("#")
+	maze_right = layout[0].rfind("#")
 	# The maze proper starts where its outer walls do; below that is the climb ramp.
 	maze_start = length - 1
 	while maze_start > 0 and _char(maze_left, maze_start - 1) != " ":
@@ -330,14 +352,6 @@ func side_stop() -> Vector3:
 
 # ------------------------------------------------------------------ building
 
-func _build() -> void:
-	for n in _built:
-		n.queue_free()
-	_built.clear()
-	_build_mesh()
-	_build_collision()
-
-
 ## A tile's top at its corners (see _floor_corners): its floor, or a block higher for walls.
 func _top(col: int, row: int) -> PackedFloat32Array:
 	var f := _floor_corners(col, row)
@@ -347,13 +361,9 @@ func _top(col: int, row: int) -> PackedFloat32Array:
 	return f
 
 
+## The bottom of the section's blocks: DEPTH below its lowest floor.
 func _bottom() -> float:
-	var lowest := minf(_prev_floor, floor_y)
-	for col in width:
-		for row in length:
-			if tiles[col][row] != VOID and levels[col][row] == Level.LOW:
-				lowest = minf(lowest, floor_y - SIDE_DROP)
-	return lowest - DEPTH
+	return minf(_prev_floor, floor_y) - (SIDE_DROP if has_side_ramp() else 0.0) - DEPTH
 
 
 func _build_mesh() -> void:
@@ -367,6 +377,7 @@ func _build_mesh() -> void:
 	var bot := _bottom()
 	var side: SurfaceTool = tools[SURF_WALL_SIDE]
 	for col in width:
+		await _pause()
 		for row in length:
 			var kind: int = tiles[col][row]
 			if kind == VOID:
@@ -397,13 +408,11 @@ func _build_mesh() -> void:
 	var materials := [_material("floor"), _material("walls"), _material("tops")]
 	for i in 3:
 		var st: SurfaceTool = tools[i]
-		st.generate_tangents() # needed by the tile normal maps
 		st.commit(mesh)
 		mesh.surface_set_material(i, materials[i])
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	add_child(mi)
-	_built.append(mi)
 
 
 ## Whether the side face towards neighbour (col, row) shows: unless the neighbour is solid and its top, at the
@@ -415,15 +424,22 @@ func _shows(col: int, row: int, ca: int, cb: int, ya: float, yb: float) -> bool:
 	return n[ca] < ya - 1e-4 or n[cb] < yb - 1e-4
 
 
-## One flat quad facing `normal`. UVs put one whole texture on each block face.
+## One flat quad facing `normal`. UVs put one whole texture on each block face. Tangents (for the tile normal
+## maps) are set here, the way Godot's generate_tangents() would, but without its cost on the whole mesh.
 func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3) -> void:
 	# Godot draws clockwise triangles (seen from the front) as front faces.
 	if (b - a).cross(c - a).dot(normal) > 0:
 		var t := b
 		b = d
 		d = t
+	# The texture's u runs along x (along z on faces looking along x), its v along z on tops and down the sides.
+	var u := Vector3.BACK if absf(normal.x) > 0.5 else Vector3.RIGHT
+	u = (u - normal * normal.dot(u)).normalized()
+	var v := Vector3.BACK if absf(normal.y) > 0.5 else Vector3.DOWN
+	var tangent := Plane(u, 1.0 if u.cross(normal).dot(v) >= 0.0 else -1.0)
 	for p in [a, b, c, a, c, d]:
 		st.set_normal(normal)
+		st.set_tangent(tangent)
 		st.set_uv(_uv(p, normal))
 		st.add_vertex(p)
 
@@ -451,15 +467,14 @@ func _material(set_name: String) -> StandardMaterial3D:
 # ------------------------------------------------------------------ collision
 
 func _build_collision() -> void:
+	# The bodies join the scene once they have all their shapes: a body already in the physics world
+	# rebuilds its whole shape for every one added.
 	var floor_body := StaticBody3D.new()
 	floor_body.name = "Floor"
-	add_child(floor_body)
 	var wall_body := StaticBody3D.new()
 	wall_body.name = "Walls"
 	wall_body.physics_material_override = PhysicsMaterial.new()
 	wall_body.physics_material_override.friction = 0.0
-	add_child(wall_body)
-	_built.append_array([floor_body, wall_body])
 
 	# Each level (maze, side room, climb ramp, side ramp) is built separately, so every slab is one flat or
 	# evenly sloped piece.
@@ -471,6 +486,7 @@ func _build_collision() -> void:
 		# identical runs in the next rows into rectangles.
 		var open := {} # Vector2i(first col, last col) -> first row it started on
 		for row in length + 1:
+			await _pause()
 			var runs := []
 			if row < length:
 				for run in _runs_along_row(row, solid):
@@ -487,12 +503,14 @@ func _build_collision() -> void:
 		# slab face. A lone block that's in no run gets its own.
 		var covered := {}
 		for row in length:
+			await _pause()
 			for run in _runs_along_row(row, wall):
 				if run[1] > run[0]:
 					_slab(wall_body, run[0], run[1], row, row, false)
 					for col in range(run[0], run[1] + 1):
 						covered[Vector2i(col, row)] = true
 		for col in width:
+			await _pause()
 			for run in _runs_along_col(col, wall):
 				if run[1] > run[0]:
 					_slab(wall_body, col, col, run[0], run[1], false)
@@ -502,6 +520,8 @@ func _build_collision() -> void:
 			for row in length:
 				if wall.call(col, row) and not covered.has(Vector2i(col, row)):
 					_slab(wall_body, col, col, row, row, false)
+	add_child(floor_body)
+	add_child(wall_body)
 
 
 func _runs_along_row(row: int, solid: Callable) -> Array:
@@ -589,15 +609,44 @@ func _add_chevrons(bottom: Vector3, top: Vector3) -> void:
 			add_child(piece)
 
 
-## Wall up the exit behind Slock, once it's through: no going back.
+## Wall up the exit behind Slock, once it's through: no going back. One wall block, built on its own.
 func seal_exit() -> void:
 	if _exit_sealed:
 		return
 	_exit_sealed = true
-	var e := exit_tile()
-	tiles[e.x][e.y] = WALL
 	open_gate()
-	_build()
+	var e := exit_tile()
+	var c := tile_centre(e)
+	var h := tile * 0.5
+	var top := floor_y + tile
+	var sides := SurfaceTool.new()
+	sides.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var lid := SurfaceTool.new()
+	lid.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var x0 := c.x - h
+	var x1 := c.x + h
+	var z0 := c.z - h
+	var z1 := c.z + h
+	_quad(lid, Vector3(x0, top, z0), Vector3(x1, top, z0), Vector3(x1, top, z1), Vector3(x0, top, z1), Vector3.UP)
+	_quad(sides, Vector3(x0, floor_y, z1), Vector3(x0, top, z1), Vector3(x1, top, z1), Vector3(x1, floor_y, z1), Vector3.BACK)
+	_quad(sides, Vector3(x0, floor_y, z0), Vector3(x0, top, z0), Vector3(x1, top, z0), Vector3(x1, floor_y, z0), Vector3.FORWARD)
+	var mesh := ArrayMesh.new()
+	for pair in [[sides, "walls"], [lid, "tops"]]:
+		pair[0].commit(mesh)
+		mesh.surface_set_material(mesh.get_surface_count() - 1, _material(pair[1]))
+	var block := MeshInstance3D.new()
+	block.mesh = mesh
+	add_child(block)
+	var body := StaticBody3D.new()
+	body.physics_material_override = PhysicsMaterial.new()
+	body.physics_material_override.friction = 0.0
+	var shape := CollisionShape3D.new()
+	shape.shape = BoxShape3D.new()
+	shape.shape.size = Vector3.ONE * tile
+	shape.position = c + Vector3.UP * h
+	body.add_child(shape)
+	add_child(body)
+	tiles[e.x][e.y] = WALL
 
 
 # ------------------------------------------------------------------ pellets and pickups
@@ -611,71 +660,93 @@ const PICKUP_HEIGHT := 0.6        # power pellets, clocks and keys float higher 
 const PICKUP_BOB := 0.12          # ... and bob more
 const OUTLINE_PX := 0.5           # black outline width round the orbs, in screen pixels
 
-var _floats := {} # Vector2i(col, row) -> [home, phase, spin (deg/s), bob speed (rad/s), bob height]
+var _pellets_left := 0            # pellets of any colour still uneaten: the gate opens at none
+var _heights := {}                # Vector2i(col, row) -> world height of what floats there
+var _slots := {}                  # orbs: Vector2i(col, row) -> [sphere batch, ring batch, instance index]
+var _orb_batches: Array[Node] = []
+var _pickups := {}                # clocks and keys: Vector2i(col, row) -> their node ...
+var _floats := {}                 # ... and how it floats: [home, phase]
 
 
+## The orbs (pellets, gold pellets, power pellets) are drawn in batches, one per look: thousands of them in the
+## later sections. They bob on the GPU (orb.gdshader). Clocks and keys are a few separate nodes.
 func _spawn_pellets() -> void:
-	var pellet_look := _orb(PELLET_RADIUS * tile, Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2))
-	var gold_look := _orb(GOLD_RADIUS * tile, Color(1.0, 0.75, 0.1, 0.72), Color(1.3, 0.8, 0.1))
-	var power_look := _orb(POWER_RADIUS * tile, Color(1.0, 0.85, 0.15, 0.72), Color(1.2, 0.85, 0.1))
+	var looks := { # Eaten -> [radius, float height, bob height, colour, glow]
+		Eaten.PELLET: [PELLET_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2)],
+		Eaten.GOLD: [GOLD_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(1.0, 0.75, 0.1, 0.72), Color(1.3, 0.8, 0.1)],
+		Eaten.POWER: [POWER_RADIUS, PICKUP_HEIGHT, PICKUP_BOB, Color(1.0, 0.85, 0.15, 0.72), Color(1.2, 0.85, 0.1)],
+	}
+	var kind_of := {".": Eaten.PELLET, ",": Eaten.GOLD, "O": Eaten.POWER, "o": Eaten.POWER, "C": Eaten.CLOCK, "K": Eaten.KEY}
+	var spots := {} # Eaten -> [Vector2i]
 	for row in length:
+		await _pause()
 		for col in width:
+			var kind: Eaten = kind_of.get(_char(col, row), Eaten.NOTHING)
+			if kind == Eaten.NOTHING:
+				continue
 			var key := Vector2i(col, row)
-			var at := tile_centre(key)
-			match _char(col, row):
-				".", ",":
-					var gold := _char(col, row) == ","
-					_place(key, _add_orb(gold_look if gold else pellet_look), Eaten.GOLD if gold else Eaten.PELLET,
-						[at + Vector3.UP * PELLET_HEIGHT * tile, randf() * 100.0,
-						randf_range(40.0, 140.0) * (1 if randf() < 0.5 else -1), randf_range(1.2, 2.4), PELLET_BOB * tile])
-				"O", "o":
-					_place(key, _add_orb(power_look), Eaten.POWER, _pickup_float(at))
-				"C":
-					_place(key, _clock(), Eaten.CLOCK, _pickup_float(at))
-				"K":
-					_place(key, _key(), Eaten.KEY, _pickup_float(at))
+			pellets[key] = kind
+			if kind in [Eaten.CLOCK, Eaten.KEY]:
+				var home := tile_centre(key) + Vector3.UP * PICKUP_HEIGHT * tile
+				_pickups[key] = _clock() if kind == Eaten.CLOCK else _key()
+				_floats[key] = [home, randf() * 10.0]
+				_heights[key] = home.y
+			else:
+				_pellets_left += 1
+				if not spots.has(kind):
+					spots[kind] = []
+				spots[kind].append(key)
 
+	for kind in spots:
+		var look: Array = looks[kind]
+		var radius: float = look[0] * tile
+		var sphere := SphereMesh.new()
+		sphere.radius = radius
+		sphere.height = radius * 2.0
+		sphere.radial_segments = 24
+		sphere.rings = 12
+		var jelly := ShaderMaterial.new()
+		jelly.shader = load("res://scripts/orb.gdshader")
+		jelly.set_shader_parameter("albedo", look[3])
+		jelly.set_shader_parameter("emission", look[4])
+		sphere.material = jelly
+		var ring := QuadMesh.new()
+		var half := radius * 1.6 # room for the ring outside the sphere
+		ring.size = Vector2.ONE * half * 2.0
+		var outline := ShaderMaterial.new()
+		outline.shader = load("res://scripts/outline.gdshader")
+		outline.set_shader_parameter("radius", radius)
+		outline.set_shader_parameter("half_size", half)
+		outline.set_shader_parameter("width_px", OUTLINE_PX)
+		ring.material = outline
 
-func _place(key: Vector2i, node: Node3D, kind: Eaten, float_: Array) -> void:
-	pellets[key] = node
-	_kinds[key] = kind
-	_floats[key] = float_
-
-
-func _pickup_float(at: Vector3) -> Array:
-	return [at + Vector3.UP * PICKUP_HEIGHT * tile, randf() * 10.0, 150.0, 3.0, PICKUP_BOB * tile]
-
-
-## A see-through jelly sphere and its outline: a flat ring facing the camera around the sphere's edge
-## (see outline.gdshader). Returns [sphere mesh, ring mesh], shared by every orb of that look.
-func _orb(radius: float, color: Color, glow: Color) -> Array:
-	var sphere := SphereMesh.new()
-	sphere.radius = radius
-	sphere.height = radius * 2.0
-	sphere.material = _glass(color, glow, 0.05)
-
-	var ring := QuadMesh.new()
-	var half := radius * 1.6 # room for the ring outside the sphere
-	ring.size = Vector2.ONE * half * 2.0
-	var outline := ShaderMaterial.new()
-	outline.shader = load("res://scripts/outline.gdshader")
-	outline.set_shader_parameter("radius", radius)
-	outline.set_shader_parameter("half_size", half)
-	outline.set_shader_parameter("width_px", OUTLINE_PX)
-	ring.material = outline
-	return [sphere, ring]
-
-
-func _add_orb(look: Array) -> MeshInstance3D:
-	var orb := MeshInstance3D.new()
-	orb.mesh = look[0]
-	orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var edge := MeshInstance3D.new()
-	edge.mesh = look[1]
-	edge.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	orb.add_child(edge)
-	add_child(orb)
-	return orb
+		var keys: Array = spots[kind]
+		var batches := []
+		for mesh in [sphere, ring]:
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_custom_data = true
+			mm.mesh = mesh
+			mm.instance_count = keys.size()
+			var batch := MultiMeshInstance3D.new()
+			batch.multimesh = mm
+			batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(batch)
+			_orb_batches.append(batch)
+			batches.append(mm)
+		var pellet: bool = kind != Eaten.POWER
+		for n in keys.size():
+			if n % 64 == 0:
+				await _pause()
+			var key: Vector2i = keys[n]
+			var home: Vector3 = tile_centre(key) + Vector3.UP * look[1] * tile
+			# Each bobs at its own pace, out of step with the rest: (phase, speed rad/s, height).
+			var bob := Color(randf() * (100.0 if pellet else 10.0), randf_range(1.2, 2.4) if pellet else 3.0, look[2] * tile, 0)
+			for mm: MultiMesh in batches:
+				mm.set_instance_transform(n, Transform3D(Basis(), home))
+				mm.set_instance_custom_data(n, bob)
+			_slots[key] = [batches[0], batches[1], n]
+			_heights[key] = home.y
 
 
 ## The clock (side rooms): a tall glowing cyan crystal.
@@ -705,7 +776,7 @@ func _add_block(size: Vector3, look: Material) -> MeshInstance3D:
 	return block
 
 
-## See-through, glowing material for the orbs, pickups and gate.
+## See-through, glowing material for the pickups and gate.
 static func _glass(color: Color, glow: Color, roughness: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -716,36 +787,38 @@ static func _glass(color: Color, glow: Color, roughness: float) -> StandardMater
 	return m
 
 
-## Pellets spin at their own speed and direction, and bob up and down out of step.
-func _float_pellets() -> void:
+## Clocks and keys spin and bob.
+func _float_pickups() -> void:
 	var time := Time.get_ticks_msec() / 1000.0
-	for key in pellets:
-		var pellet: Node3D = pellets[key]
+	for key in _pickups:
 		var f: Array = _floats[key]
 		var ph: float = f[1] + time
-		pellet.position = f[0] + Vector3.UP * sin(ph * f[3]) * f[4]
-		pellet.rotation_degrees = Vector3(sin(ph * 0.7) * 8.0, ph * f[2], cos(ph * 0.9) * 8.0)
+		_pickups[key].position = f[0] + Vector3.UP * sin(ph * 3.0) * PICKUP_BOB * tile
+		_pickups[key].rotation_degrees = Vector3(0, ph * 150.0, 0)
 
 
 ## How many pellets (of any colour) are left: the gate opens at none.
 func pellets_left() -> int:
-	var n := 0
-	for kind in _kinds.values():
-		if kind in [Eaten.PELLET, Eaten.GOLD, Eaten.POWER]:
-			n += 1
-	return n
+	return _pellets_left
 
 
 ## Eat or take whatever floats on the tile under `world`, if it's level with it.
 func try_eat_pellet(world: Vector3) -> Eaten:
 	var key := tile_under(world)
-	var pellet: Node3D = pellets.get(key)
-	if pellet == null or absf(pellet.global_position.y - world.y) > tile * 1.5:
+	if not pellets.has(key) or absf(_heights[key] - world.y) > tile * 1.5:
 		return Eaten.NOTHING
+	var kind: Eaten = pellets[key]
 	pellets.erase(key)
-	pellet.queue_free()
-	var kind: Eaten = _kinds[key]
-	_kinds.erase(key)
+	if _slots.has(key):
+		var slot: Array = _slots[key]
+		for mm: MultiMesh in [slot[0], slot[1]]:
+			mm.set_instance_transform(slot[2], Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO)) # gone
+		_slots.erase(key)
+		_pellets_left -= 1
+	else:
+		_pickups[key].queue_free()
+		_pickups.erase(key)
+		_floats.erase(key)
 	return kind
 
 
