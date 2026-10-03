@@ -25,6 +25,10 @@ namespace Slock
         // (breakaway accel = CreepDamping * CreepFadeSpeed / 4).
         const float CreepDamping = 6f;           // per second, at rest
         const float CreepFadeSpeed = 6f;         // tiles/s
+        // Level means stop: grip that fades as the board tilts. Level, it's LevelGrip per second of speed (stops from
+        // 8 blocks/s in about a block); it eases off with the square of the tilt and is gone at full tilt, so a
+        // partial tilt settles to a steady partial speed and full tilt slides freely.
+        const float LevelGrip = 8f;              // per second
         public float shrinkSpeed = 3f;           // size units per second when passing through a gate
 
         float targetSize = 1f;
@@ -408,6 +412,13 @@ namespace Slock
             float sp = flat.magnitude, fade = CreepFadeSpeed * gridTs;
             if (sp > 1e-4f && sp < fade)
                 Body.AddForce(-flat * (CreepDamping * (1f - sp / fade)), ForceMode.Acceleration);
+
+            // Level means stop (see LevelGrip). "Level" is the whole board, so tilting toward a turn doesn't brake.
+            var gNow = Physics.gravity;
+            float tilt = Mathf.Clamp01(new Vector2(gNow.x, gNow.z).magnitude
+                / Mathf.Max(1e-4f, gNow.magnitude * Mathf.Sin(ControlSettings.MaxTilt * Mathf.Deg2Rad)));
+            float slack = 1f - tilt;
+            Body.AddForce(-flat * (LevelGrip * slack * slack), ForceMode.Acceleration);
 
             // Safety limit only (keeps fast falls from tunnelling); not part of the feel.
             if (flat.magnitude > ControlSettings.MaxSpeed)
