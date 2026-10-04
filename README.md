@@ -22,7 +22,7 @@ Slock is in early development. If it doesn't start or something breaks, please [
 
 | | |
 |---|---|
-| ![Power mode: the worms turn blue and edible](docs/screenshots/power-mode.jpg) | ![A side room full of gold pellets](docs/screenshots/side-room.jpg) |
+| ![Power mode: the Swurms turn blue and edible](docs/screenshots/power-mode.jpg) | ![A side room full of gold pellets](docs/screenshots/side-room.jpg) |
 | ![The course climbs away into the void](docs/screenshots/overview.jpg) | ![Deeper sections have smaller blocks and denser mazes](docs/screenshots/deep-section.jpg) |
 
 ## How to play
@@ -103,8 +103,8 @@ The standard build is all you need (not the .NET one: the game is written in GDS
 1. Open Godot, click **Import**, and choose this folder's `project.godot`.
 2. Press **F5** (or the ▶ button) to play.
 
-To make a build you can share, use **Project → Export** (Godot offers to download its export templates the first
-time). Builds go in `Builds/`, which git ignores.
+To make a build you can share, use **Project → Export** and pick **Linux**, **Windows** or **Mac** (the presets are
+included; Godot offers to download its export templates the first time). Put builds in `Builds/`, which git ignores.
 
 ### Where things are
 
