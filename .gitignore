@@ -16,3 +16,6 @@ __pycache__/
 
 # Blender auto-backups
 *.blend1
+
+# Music masters (the game plays the .ogg copies in sounds/)
+/art-work/music/

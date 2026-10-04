@@ -1,16 +1,19 @@
 class_name Sounds
 extends Node
-## Sound effects (not positional). The pellet pops, ouches and steel woo were made in Audacity; the big pop and
-## slug clicks by art-work/sounds.py. How loud each plays is set here. Where there are several of a kind, it
-## picks one at random, never the same one twice in a row.
+## Sound effects (not positional) and the music. The pellet pops, ouches and steel woo were made in Audacity; the
+## big pop and slug clicks by art-work/sounds.py. The songs are .ogg copies of WAV masters kept out of git. How loud
+## each plays is set here. Where there are several of a kind, it picks one at random, never the same one twice in
+## a row.
 
-const PELLET_VOLUME := 0.2        # kept quiet: pellets go off constantly and mustn't become a distraction
+const PELLET_VOLUME := 0.5       # kept quiet: pellets go off constantly and mustn't become a distraction
 const PELLET_TUNE := -8.0         # semitones: the pops play this far below how they were recorded
 const PELLET_DETUNE := 0.55       # semitones of random pitch wobble, so repeats never sound copy-pasted
 const VOICES := 6                 # pops can overlap; each gets its own player so detuning doesn't bleed
-const OUCH_VOLUME := 0.5          # Slock hit by a swurm (the clips are recorded near full volume)
-const PICKUP_VOLUME := 0.5        # power pellets and powerups: steel woo, slug clicks, big pop
+const OUCH_VOLUME := 0.4          # Slock hit by a swurm (the clips are recorded near full volume)
+const PICKUP_VOLUME := 0.5        # power pellets and powerups: steel woo, big pop
+const SLUG_VOLUME := 0.2          # slug pickups: the single slug and the three-slug pack
 const BIG_POP_DETUNE := 1.0       # semitones of random pitch wobble on the big pop
+const MUSIC_VOLUME := 0.7        # the theme, looping under everything
 
 var _pellets: Array[AudioStream] = []
 var _ouches: Array[AudioStream] = []
@@ -21,6 +24,10 @@ var _big_pop: AudioStream
 var _voices: Array[AudioStreamPlayer] = []
 var _ouch_player: AudioStreamPlayer # its own player, so a burst of pops can't cut it off
 var _pickup_player: AudioStreamPlayer # likewise
+var _music: AudioStreamPlayer
+var _themes: Array[String] = []   # the theme-00x songs
+var _queue: Array[String] = []    # ... still to play this time round
+var _last_song := ""
 var _next_voice := 0
 var _last_pellet := -1
 var _last_ouch := -1
@@ -43,6 +50,30 @@ func _ready() -> void:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
 		_voices.append(p)
+	# Music plays from launch, through pauses and slug aiming too.
+	for file in ResourceLoader.list_directory("res://sounds"):
+		if file.begins_with("theme-") and file.ends_with(".ogg"):
+			_themes.append("res://sounds/" + file)
+	_music = AudioStreamPlayer.new()
+	_music.process_mode = Node.PROCESS_MODE_ALWAYS
+	_music.finished.connect(_next_song)
+	add_child(_music)
+	_play(_music, load("res://sounds/game-theme.ogg"), MUSIC_VOLUME, 1.0)
+
+
+## The music: game-theme.ogg first, then the theme-00x songs in a shuffled order, reshuffled each time round
+## (never the same song twice in a row).
+func _next_song() -> void:
+	if _themes.is_empty():
+		_play(_music, _music.stream, MUSIC_VOLUME, 1.0)
+		return
+	if _queue.is_empty():
+		_queue = _themes.duplicate()
+		_queue.shuffle()
+		if _queue.size() > 1 and _queue[0] == _last_song:
+			_queue.reverse()
+	_last_song = _queue.pop_front()
+	_play(_music, load(_last_song), MUSIC_VOLUME, 1.0)
 
 
 ## A pellet eaten: one of the six pops, slightly detuned.
@@ -67,12 +98,12 @@ func steel() -> void:
 
 ## One slug picked up: a clip snapping in.
 func slug_click() -> void:
-	_play(_pickup_player, _slug_click, PICKUP_VOLUME, 1.0)
+	_play(_pickup_player, _slug_click, SLUG_VOLUME, 1.0)
 
 
 ## Three slugs picked up: a quick reload.
 func slug_reload() -> void:
-	_play(_pickup_player, _slug_reload, PICKUP_VOLUME, 1.0)
+	_play(_pickup_player, _slug_reload, SLUG_VOLUME, 1.0)
 
 
 ## A power pellet or pellet powerup: a big bubble pop.

@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Slock"
-config/version="0.6.0"
+config/version="0.7.0"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.7")
 config/icon="res://icon.png"
@@ -30,5 +30,5 @@ common/physics_interpolation=true
 
 [rendering]
 
-anti_aliasing/quality/msaa_3d=2
 textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=2
