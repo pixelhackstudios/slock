@@ -14,8 +14,5 @@ __pycache__/
 /art-work/*.zip
 /art-work/downloaded-attrbutions/*.zip
 
-# Sounds left over from the Unity version, kept locally for reference (the ones the game uses are in sounds/)
-/art-work/unity-sounds/
-
 # Blender auto-backups
 *.blend1
