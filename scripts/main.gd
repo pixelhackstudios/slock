@@ -8,9 +8,10 @@ extends Node3D
 ## run ends when time runs out, or you fall down a pit or off an edge.
 ## Slugs: click to aim (the game freezes; tilt picks a direction), click again to fire: it kills the first swurm or
 ## breaks the first inner wall in its way. Powerups float in each section and come back 10 s after being taken.
-## Mouse (or left stick) tilts the board. Esc pauses, R restarts.
+## Mouse (or left stick) tilts the board. Esc pauses, R restarts, Q quits (from the title or pause screens).
+## Runs start from the title screen; a good score goes on the local leaderboard (leaderboard.gd).
 
-enum State { PLAYING, PAUSED, OVER }
+enum State { TITLE, PLAYING, PAUSED, OVER }
 
 const START_TIME := 35.0
 const PELLET_TIME := 1.0          # seconds each pellet adds
@@ -52,7 +53,7 @@ var slock: Slock
 var rig: TiltRig
 var sounds: Sounds
 var hud: Hud
-var state := State.PLAYING
+var state := State.TITLE
 var now := 0.0                    # game clock, seconds
 var power_until := 0.0
 var time_left := START_TIME
@@ -75,6 +76,8 @@ var _aim := Vector2i(0, 1)        # the direction picked (on the grid: +y is up 
 var _aim_mark: MeshInstance3D     # translucent red block over what the slug would hit
 var _steel_until := 0.0
 var _run_started := 0             # msec, so the click that starts a run doesn't fire a slug
+var _end_reason := ""             # the game-over screen, kept to redraw it after the name is entered
+var _end_summary := ""
 
 
 ## How nasty section `i` is (see also MazeGen): everything ramps up and then plateaus.
@@ -100,13 +103,15 @@ func _ready() -> void:
 	add_child(level)
 	hud = Hud.new()
 	add_child(hud)
+	hud.name_submitted.connect(_on_name_submitted)
+	hud.play_again.connect(_start_run)
 	_aim_mark = MeshInstance3D.new()
 	_aim_mark.mesh = BoxMesh.new()
 	_aim_mark.mesh.material = Section._glass(Color(1.0, 0.08, 0.08, 0.45), Color(0.7, 0.0, 0.0), 0.2)
 	_aim_mark.visible = false
 	add_child(_aim_mark)
 
-	_start_run()
+	_start_run(false)
 
 
 ## Adds a node that stops while the game is paused.
@@ -116,7 +121,8 @@ func _game(node: Node) -> Node:
 	return node
 
 
-func _start_run() -> void:
+## A fresh course: straight into play, or (`play` false) sitting behind the title screen.
+func _start_run(play := true) -> void:
 	for s in sections.values():
 		s.queue_free()
 	sections.clear()
@@ -152,30 +158,51 @@ func _start_run() -> void:
 	_set_aiming(false)
 	_steel_until = 0.0
 	slock.set_steel(false)
-	_run_started = Time.get_ticks_msec()
-	state = State.PLAYING
 	get_tree().paused = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	hud.show_overlay("")
 	hud.clear_popups()
+	if play:
+		_begin()
+	else:
+		state = State.TITLE
+		rig.input_enabled = false
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		hud.show_title()
+
+
+## The run starts: the clock goes and the board is yours.
+func _begin() -> void:
+	state = State.PLAYING
+	rig.input_enabled = true
+	rig.reset_trackball()
+	_run_started = Time.get_ticks_msec()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	hud.hide_screen()
 	hud.popup("GO!", Color.WHITE, 1.0)
 
 
-func _end_run(title: String) -> void:
+func _end_run(reason: String) -> void:
 	state = State.OVER
 	rig.input_enabled = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	hud.show_overlay(title, Hud.RED,
-		"score %s   ·   floor %d   ·   %d pellets   ·   %d swurms eaten   ·   %ds" % [Hud._thousands(score()), height,
-		_pellets_eaten, _swurms_eaten, roundi(_run_seconds)],
-		"R or Enter to play again")
+	_end_reason = reason
+	_end_summary = "score %s   ·   floor %d   ·   %d pellets   ·   %d swurms eaten   ·   %ds" % [
+		Hud._thousands(score()), height, _pellets_eaten, _swurms_eaten, roundi(_run_seconds)]
+	hud.show_game_over(_end_reason, _end_summary, Leaderboard.qualifies(score()), 0)
+
+
+func _on_name_submitted(player: String) -> void:
+	var rank := Leaderboard.submit(player, score(), height, _run_seconds)
+	hud.show_game_over(_end_reason, _end_summary, false, rank)
 
 
 func _set_paused(paused: bool) -> void:
 	state = State.PAUSED if paused else State.PLAYING
 	get_tree().paused = paused
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if paused else Input.MOUSE_MODE_CAPTURED
-	hud.show_overlay("PAUSED" if paused else "", Color.WHITE, "", "Esc to resume    R to restart")
+	if paused:
+		hud.show_pause()
+	else:
+		hud.hide_screen()
 
 
 func score() -> int:
@@ -185,10 +212,19 @@ func score() -> int:
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key != null and key.pressed and not key.echo:
-		if key.keycode == KEY_R or (state == State.OVER and key.keycode in [KEY_ENTER, KEY_KP_ENTER]):
-			_start_run()
+		if state == State.TITLE:
+			if key.keycode == KEY_SPACE:
+				_begin()
+			elif key.keycode == KEY_Q:
+				get_tree().quit()
+		elif key.keycode == KEY_Q and state == State.PAUSED:
+			get_tree().quit()
+		elif key.keycode == KEY_R or (state == State.OVER and key.keycode in [KEY_ENTER, KEY_KP_ENTER]):
+			_start_run() # (while the name box is up, it takes the keys itself)
 		elif key.keycode == KEY_ESCAPE and state != State.OVER and not aiming:
 			_set_paused(state == State.PLAYING)
+	elif event is InputEventMouseButton and event.pressed and state == State.TITLE:
+		_begin()
 	elif event is InputEventMouseButton and event.pressed and state == State.PLAYING:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED # e.g. back after switching windows
