@@ -70,7 +70,7 @@ func slug_click() -> void:
 	_play(_pickup_player, _slug_click, PICKUP_VOLUME, 1.0)
 
 
-## Slugs refilled: a quick reload.
+## Three slugs picked up: a quick reload.
 func slug_reload() -> void:
 	_play(_pickup_player, _slug_reload, PICKUP_VOLUME, 1.0)
 

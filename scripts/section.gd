@@ -27,7 +27,7 @@ const DEPTH := 1.0                # how far blocks reach below the lowest floor 
 
 enum { VOID, FLOOR, WALL }
 enum Level { MAIN, LOW, CLIMB, SIDE } # the maze, the side room, the climb ramp, the side ramp
-enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY, STEEL, CLEAR_DOTS, CLOSE_TRAPS, REFILL_SLUGS, EXTRA_SLUG }
+enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY, STEEL, CLEAR_DOTS, CLOSE_TRAPS, SLUG_PACK, EXTRA_SLUG }
 enum { SURF_FLOOR, SURF_WALL_SIDE, SURF_WALL_TOP }
 
 var index := 0
@@ -972,7 +972,7 @@ func remove_pellets(fraction: float) -> int:
 
 # ------------------------------------------------------------------ powerups
 
-const POWERUPS: Array[Eaten] = [Eaten.CLEAR_DOTS, Eaten.STEEL, Eaten.REFILL_SLUGS, Eaten.EXTRA_SLUG, Eaten.CLOSE_TRAPS]
+const POWERUPS: Array[Eaten] = [Eaten.CLEAR_DOTS, Eaten.STEEL, Eaten.SLUG_PACK, Eaten.EXTRA_SLUG, Eaten.CLOSE_TRAPS]
 const POWERUP_RESPAWN := 10.0     # seconds after one is taken until a new one appears, somewhere already cleared
 
 var _once := {}                   # clear-the-dots and close-the-traps: at most one of each per section
@@ -1003,7 +1003,7 @@ func _add_powerup(key: Vector2i) -> void:
 					_glass(Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2), 0.05))
 		Eaten.STEEL: # a shiny steel block
 			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3.ONE * 0.36, steel_look())
-		Eaten.REFILL_SLUGS: # a row of three slugs
+		Eaten.SLUG_PACK: # a row of three slugs
 			for k in [-1, 0, 1]:
 				_piece(node, BoxMesh.new(), Vector3(k * 0.2, 0, 0), Vector3.ONE * 0.13, glow)
 		Eaten.EXTRA_SLUG: # one big slug

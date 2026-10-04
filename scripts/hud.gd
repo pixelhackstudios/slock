@@ -91,7 +91,7 @@ func show_status(score: int, time_left: float, pellets_left: int, power_left: fl
 ## The slug count, or the aiming hint.
 func show_slugs(count: int, aiming: bool) -> void:
 	if aiming:
-		_slugs.text = "AIMING — TILT TO PICK, CLICK TO FIRE"
+		_slugs.text = "AIMING — TILT TO PICK, LEFT CLICK FIRES, RIGHT CLICK CANCELS"
 	else:
 		_slugs.text = "SLUGS x%d — CLICK TO AIM" % count if count > 0 else "NO SLUGS"
 

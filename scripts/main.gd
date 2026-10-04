@@ -6,8 +6,9 @@ extends Node3D
 ## eating one gives time back. Eat every pellet (the gold ones down in the side room too) to open the gate, or find
 ## the side room's key; go through for a time bonus, and the climb ramp boosts you up into the next section. The
 ## run ends when time runs out, or you fall down a pit or off an edge.
-## Slugs: click to aim (the game freezes; tilt picks a direction), click again to fire: it kills the first swurm or
-## breaks the first inner wall in its way. Powerups float in each section and come back 10 s after being taken.
+## Slugs: left click to aim (the game freezes; tilt picks a direction), left click again to fire, right click to
+## back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent ones carry
+## over, pickups add to it, and each gate adds a growing allowance on top. Powerups float in each section and come back 10 s after being taken.
 ## Mouse (or left stick) tilts the board. Esc pauses, R restarts, Q quits (from the title or pause screens).
 ## Runs start from the title screen; a good score goes on the local leaderboard (leaderboard.gd).
 
@@ -39,7 +40,8 @@ const POWER_FLASH := 2.0          # scared swurms flash white for the last this 
 const HIT_REACH := 0.9            # Slock and a swurm head touch when this close on both axes (blocks)
 const HIT_COOLDOWN := 1.0         # a swurm that just hit Slock only knocks it again for that long (no new ouch)
 
-const START_SLUGS := 3            # and one more each gate after that
+const START_SLUGS := 3            # gates add 4, 5, 6... on top of whatever you carry
+const SLUG_PACK := 3              # what the three-slug pickup adds
 const STEEL_DURATION := 10.0      # Slock of Steel: break inner walls and swurms by pushing into them
 const STEEL_WALL_POINTS := 20
 const CLEAR_DOTS_FRACTION := 0.25 # clear-the-dots removes this much of what's left
@@ -69,7 +71,7 @@ var _run_seconds := 0.0
 var _released := {}               # sections whose swurms have been let out
 var _sealed_up_to := -1           # sections whose exit has been walled up behind Slock
 var slugs := START_SLUGS
-var _slug_allowance := START_SLUGS # refilled to at each gate, one more each time
+var _slug_allowance := START_SLUGS # added at each gate, one more each time
 var _flying: Array[Slug] = []
 var aiming := false               # slug aim mode: the game is frozen, tilt picks the direction, click fires
 var _aim := Vector2i(0, 1)        # the direction picked (on the grid: +y is up the course)
@@ -230,6 +232,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED # e.g. back after switching windows
 		elif event.button_index == MOUSE_BUTTON_LEFT and Time.get_ticks_msec() - _run_started > 500:
 			_on_fire_click()
+		elif event.button_index == MOUSE_BUTTON_RIGHT and aiming:
+			_set_aiming(false) # back out: the slug stays in the store
 
 
 # ------------------------------------------------------------------ sections
@@ -351,7 +355,7 @@ func _physics_process(delta: float) -> void:
 			if not here.gate_open():
 				here.open_gate()
 			hud.popup("KEY!  GATE OPEN", Color(1.0, 0.4, 1.0), 1.6)
-		Section.Eaten.STEEL, Section.Eaten.CLEAR_DOTS, Section.Eaten.CLOSE_TRAPS, Section.Eaten.REFILL_SLUGS, \
+		Section.Eaten.STEEL, Section.Eaten.CLEAR_DOTS, Section.Eaten.CLOSE_TRAPS, Section.Eaten.SLUG_PACK, \
 				Section.Eaten.EXTRA_SLUG:
 			here.powerup_taken(now)
 			_powerup(eaten, here, p)
@@ -427,8 +431,8 @@ func _through_gate(here: Section) -> void:
 	height = i + 1
 	_bonus += FLOOR_POINTS * height
 	time_left += time_bonus(i)
-	_slug_allowance += 1 # your slugs back, plus one more
-	slugs = _slug_allowance
+	_slug_allowance += 1 # one more each gate, on top of what you carry
+	slugs += _slug_allowance
 	hud.popup("SLUGS x%d" % slugs, Color(1.0, 0.85, 0.3), 1.6)
 	var next := Section.tile_of(i + 1)
 	slock.shrink_to(minf(slock.size, next))
@@ -474,10 +478,10 @@ func _powerup(kind: Section.Eaten, here: Section, p: Vector3) -> void:
 			var closed := here.close_traps(here.tile_under(p))
 			hud.popup("TRAPS CLOSED" if closed > 0 else "NO TRAPS HERE", Color(0.4, 1.0, 0.45), 1.4)
 			_check_gate(here)
-		Section.Eaten.REFILL_SLUGS:
+		Section.Eaten.SLUG_PACK:
 			sounds.slug_reload()
-			slugs = maxi(slugs, _slug_allowance)
-			hud.popup("SLUGS REFILLED  x%d" % slugs, Color(1.0, 0.85, 0.3), 1.4)
+			slugs += SLUG_PACK
+			hud.popup("+%d SLUGS  x%d" % [SLUG_PACK, slugs], Color(1.0, 0.85, 0.3), 1.4)
 		Section.Eaten.EXTRA_SLUG:
 			sounds.slug_click()
 			slugs += 1
@@ -503,8 +507,8 @@ func _tilt_step() -> Vector2i:
 	return Vector2i(0, 1 if g.z < 0.0 else -1) # rows run up the course, along -Z
 
 
-## First click: the game freezes in aim mode (no backing out: the slug is committed); tilting picks the direction
-## and the one thing it would hit glows red. Second click fires.
+## First left click: the game freezes in aim mode; tilting picks the direction and the one thing it would hit glows
+## red. A second left click fires; a right click backs out without spending the slug.
 func _on_fire_click() -> void:
 	if aiming:
 		_fire_slug()

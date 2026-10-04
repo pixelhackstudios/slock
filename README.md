@@ -36,7 +36,8 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 | | |
 |---|---|
 | **Mouse** (or gamepad left stick) | Tilt the world |
-| **Left click** | Aim a slug — click again to fire |
+| **Left click** | Aim a slug — left click again to fire |
+| **Right click** | Cancel aiming (keeps the slug) |
 | **Esc** | Pause |
 | **R** | Restart |
 | **Q** | Quit (from the title or pause screen) |
@@ -66,15 +67,15 @@ Green jelly worms that crawl out of the pen in the middle of each section, **one
 - **Touch one and it steals a third of your time**, and you bounce apart.
 - **Grab a big gold power pellet** and they turn **blue** for 10 seconds (+5 seconds on your clock). Blue Swurms are slow — **eat them** for **+10 seconds**, plus all the time they stole from you.
 
-### Slugs (emergency only)
+### Slugs
 
-You start with **3 slugs**. Each gate gives back what you used, **plus one more**.
+Slugs are a store you build up. You start with **3**, unspent slugs carry over, slug pickups add to the store, and each gate adds **4, then 5, then 6...** on top of whatever you're carrying.
 
-1. **Click** — the game freezes and you're in aim mode. **There's no backing out.**
+1. **Left click** — the game freezes and you're in aim mode. **Right click** backs out without using the slug.
 2. **Tilt** to aim. The one thing you'll hit glows **red**: a Swurm, or an inner wall block, up to **4 tiles** away.
-3. **Click** again to fire. A Swurm is destroyed (+10 seconds plus its stolen time) or a wall block is blasted open.
+3. **Left click** again to fire. A Swurm is destroyed (+10 seconds plus its stolen time) or a wall block is blasted open.
 
-Outer walls can't be broken. A missed shot is still a used slug — save them.
+Outer walls can't be broken. A missed shot is still a used slug.
 
 ### Powerups
 
@@ -84,7 +85,7 @@ Each section has three powerups scattered at random, and they work the moment yo
 |---|---|
 | Three blue dots | A quarter of the section's pellets vanish (at most one per section) |
 | Steel block | **Slock of Steel** for 10 seconds: push into an inner wall to smash it, and Swurms you hit are smashed too |
-| Three slugs | Slugs refilled |
+| Three slugs | +3 slugs |
 | One big slug | One extra slug |
 | Green patch | Every hole is filled in and every gap in the outer walls is closed off, in the section and its side room (at most one per section) |
 

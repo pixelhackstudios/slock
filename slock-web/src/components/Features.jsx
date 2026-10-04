@@ -41,10 +41,10 @@ const SECTIONS = [
     shot: powerMode,
     alt: 'Power mode: a blue, edible Swurm in a corridor surrounded by pellets',
     icon: Bug,
-    footer: 'Slugs are for emergencies. A miss still costs one.',
+    footer: 'Slugs carry over. Every gate adds more, and a miss still costs one.',
     groups: [
       { label: 'Swurms', items: [['Touch one, lose a third', 'It steals your time and knocks you back.'], ['Grab a power pellet', 'They turn blue. Eat them to win it all back.']] },
-      { label: 'Slugs', items: [['Click to freeze and aim', 'There\'s no backing out.'], ['Click again to fire', 'Destroy a Swurm or blast open a wall block.']] },
+      { label: 'Slugs', items: [['Left click to freeze and aim', 'Right click backs out, slug kept.'], ['Left click again to fire', 'Destroy a Swurm or blast open a wall block.']] },
     ],
   },
   {
@@ -58,7 +58,7 @@ const SECTIONS = [
     footer: 'Three powerups per section. Take one and another turns up ten seconds later.',
     groups: [
       { label: 'Powerups', items: [['Slock of Steel', 'Smash inner walls and Swurms for 10 seconds.'], ['Close Traps', 'Every hole and gap in the walls sealed.']] },
-      { label: 'Also', items: [['Clear Dots', 'A quarter of the pellets vanish.'], ['Refresh and Extra Slug', 'Refill your slugs, or carry one more.']] },
+      { label: 'Also', items: [['Clear Dots', 'A quarter of the pellets vanish.'], ['Slug pickups', 'Three slugs, or one big one, for your store.']] },
     ],
   },
 ];
