@@ -777,8 +777,10 @@ const POWER_RADIUS := 0.23        # power pellets: big glowing orbs (0.46 blocks
 const PICKUP_HEIGHT := 0.6        # power pellets, clocks and keys float higher ...
 const PICKUP_BOB := 0.12          # ... and bob more
 const OUTLINE_PX := 0.5           # black outline width round the orbs, in screen pixels
+const PICKUP_OUTLINE_PX := 1.5    # ... and round the clocks, keys and powerups
 
-var _pellets_left := 0            # pellets of any colour still uneaten: the gate opens at none
+var _pellets_left := 0            # blue pellets still uneaten: the gate opens at none (gold and power pellets
+                                  # only add time)
 var _heights := {}                # Vector2i(col, row) -> world height of what floats there
 var _slots := {}                  # orbs: Vector2i(col, row) -> [sphere batch, ring batch, instance index]
 var _orb_batches: Array[Node] = []
@@ -810,7 +812,8 @@ func _spawn_pellets() -> void:
 			elif kind == Eaten.STEEL:
 				_add_powerup(key)
 			else:
-				_pellets_left += 1
+				if kind == Eaten.PELLET:
+					_pellets_left += 1
 				if not spots.has(kind):
 					spots[kind] = []
 				spots[kind].append(key)
@@ -890,6 +893,7 @@ func _key() -> Node3D:
 	bar.mesh = BoxMesh.new()
 	bar.mesh.size = Vector3(0.7, 0.1, 0.1) * tile
 	bar.mesh.material = look
+	_outline(bar)
 	key.add_child(bar)
 	return key
 
@@ -900,8 +904,22 @@ func _add_block(size: Vector3, look: Material) -> MeshInstance3D:
 	block.mesh.size = size
 	block.mesh.material = look
 	block.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_outline(block)
 	add_child(block)
 	return block
+
+
+## Give a pickup piece (a box or sphere mesh) its black outline.
+static func _outline(piece: MeshInstance3D) -> void:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://scripts/pickup_outline.gdshader")
+	m.set_shader_parameter("width_px", PICKUP_OUTLINE_PX)
+	if piece.mesh is SphereMesh:
+		m.set_shader_parameter("sphere", true)
+		m.set_shader_parameter("half_size", Vector3.ONE * piece.mesh.radius)
+	else:
+		m.set_shader_parameter("half_size", piece.mesh.size * 0.5)
+	piece.material_overlay = m
 
 
 ## See-through, glowing material for the pickups and gate.
@@ -925,7 +943,7 @@ func _float_pickups() -> void:
 		_pickups[key].rotation_degrees = Vector3(0, ph * 150.0, 0)
 
 
-## How many pellets (of any colour) are left: the gate opens at none.
+## How many blue pellets are left: the gate opens at none.
 func pellets_left() -> int:
 	return _pellets_left
 
@@ -944,13 +962,15 @@ func try_eat_pellet(world: Vector3) -> Eaten:
 func _remove_pellet(key: Vector2i) -> void:
 	if not pellets.has(key):
 		return
+	var kind: Eaten = pellets[key]
 	pellets.erase(key)
 	if _slots.has(key):
 		var slot: Array = _slots[key]
 		for mm: MultiMesh in [slot[0], slot[1]]:
 			mm.set_instance_transform(slot[2], Transform3D(Basis().scaled(Vector3.ZERO), Vector3.ZERO)) # gone
 		_slots.erase(key)
-		_pellets_left -= 1
+		if kind == Eaten.PELLET:
+			_pellets_left -= 1
 	else:
 		_pickups[key].queue_free()
 		_pickups.erase(key)
@@ -1025,6 +1045,7 @@ func _piece(parent: Node3D, mesh: PrimitiveMesh, at: Vector3, size: Vector3, loo
 	piece.mesh = mesh
 	piece.position = at * tile
 	piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_outline(piece)
 	parent.add_child(piece)
 
 

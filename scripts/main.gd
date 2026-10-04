@@ -3,8 +3,8 @@ extends Node3D
 ## and faster than the last. Built in code: lighting, the sections, Slock, the swurms, the tilt camera and the
 ## HUD. You start with 35 seconds: pellets add time and score, swurms leave their pen one at a time and steal a
 ## third of your time when they hit you, unless a power pellet is active: then they're scared and slow, and
-## eating one gives time back. Eat every pellet (the gold ones down in the side room too) to open the gate, or find
-## the side room's key; go through for a time bonus, and the climb ramp boosts you up into the next section. The
+## eating one gives time back. Eat every blue pellet to open the gate, or find the side room's key (gold and power
+## pellets only add time); go through for a time bonus, and the climb ramp boosts you up into the next section. The
 ## run ends when time runs out, or you fall down a pit or off an edge.
 ## Slugs: left click to aim (the game freezes; tilt picks a direction), left click again to fire, right click to
 ## back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent ones carry
@@ -343,7 +343,8 @@ func _physics_process(delta: float) -> void:
 			_pellets_eaten += 1
 			_bonus += GOLD_POINTS if gold else PELLET_POINTS
 			time_left += GOLD_TIME if gold else PELLET_TIME
-			_check_gate(here)
+			if not gold:
+				_check_gate(here)
 		Section.Eaten.CLOCK:
 			sounds.pellet()
 			_bonus += CLOCK_POINTS
@@ -367,7 +368,6 @@ func _physics_process(delta: float) -> void:
 			power_until = now + POWER_DURATION
 			_chain = 0
 			hud.popup("POWER!   +%ds" % POWER_TIME, Color(1.0, 0.85, 0.2), 1.2)
-			_check_gate(here)
 
 	for swurm in here.swurms:
 		if swurm.eaten:

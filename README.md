@@ -28,7 +28,7 @@ Slock is in early development. If it doesn't start or something breaks, please [
 ## How to play
 
 You are **Slock**, a red jelly block. You don't move Slock — you **tilt the world** and Slock slides downhill.
-Eat every pellet in a section to open its gate, go through, and keep climbing before the clock runs out.
+Eat every blue pellet in a section (or find its key) to open its gate, go through, and keep climbing before the clock runs out.
 Make the top ten and your name goes on the leaderboard (it's kept on your computer).
 
 ### Controls
@@ -91,7 +91,7 @@ Each section has three powerups scattered at random, and they work the moment yo
 
 ### Gates and sections
 
-- The gate at the far end opens when you've **eaten every pellet** in the section — or found its **key**.
+- The gate at the far end opens when you've **eaten every blue pellet** in the section — or found its **key**. Gold and power pellets only add time.
 - Once you're through, the way back seals behind you.
 - Every section has **smaller blocks** (so more of them), more Swurms and more holes. Slock shrinks to fit.
 - Some sections have a **side room** down a ramp off the left wall: gold pellets, and a clock or the gate's key.

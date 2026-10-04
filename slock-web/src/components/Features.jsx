@@ -30,7 +30,7 @@ const SECTIONS = [
     footer: 'Side rooms hide gold. Worth the detour, if you\'ve got the time.',
     groups: [
       { label: 'Time', items: [['Blue pellet', '+1 second.'], ['Small yellow pellet', '+2 seconds.'], ['Clock pickup', '+20 seconds.']] },
-      { label: 'Gates', items: [['Eat every pellet', 'Or find the key, and the gate opens.'], ['No going back', 'The way behind you seals shut.']] },
+      { label: 'Gates', items: [['Eat every blue pellet', 'Or find the key, and the gate opens.'], ['No going back', 'The way behind you seals shut.']] },
     ],
   },
   {

@@ -29,6 +29,7 @@ static func fire(from: Vector3, direction: Vector3, in_section: Section) -> Slug
 	glow.emission_enabled = true
 	glow.emission = Color(2.0, 0.9, 0.1)
 	cube.mesh.material = glow
+	Section._outline(cube)
 	slug.add_child(cube)
 	return slug
 
