@@ -67,7 +67,7 @@ export default function Hero() {
           <div className="flex flex-wrap items-center gap-2 mb-7">
             <span className="badge"><span className="dot"></span>Free · MIT</span>
             <span className="badge">Windows · Mac · Linux</span>
-            <span className="badge">made in Unity 6</span>
+            <span className="badge">made in Godot 4</span>
           </div>
           <h1 className="font-display text-[1.85rem] sm:text-[2.7rem] lg:text-[3rem] leading-[1.08] tracking-tight">
             Tilt <span className="text-gradient-gold">the world.</span><br className="hidden sm:inline" />{' '}
@@ -76,7 +76,7 @@ export default function Hero() {
           <p className="mt-6 text-base sm:text-lg text-(--ink-dim) max-w-xl leading-relaxed">
             Slock is a free, open-source game about a red jelly block lost in an endless maze.
             You don't move the block. You tilt the whole world and it slides. Eat the pellets,
-            beat the clock, dodge the Slorms, and keep climbing.
+            beat the clock, dodge the Swurms, and keep climbing.
           </p>
           <div className="mt-8 sm:mt-9 flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5 sm:gap-4">
             <a href="#teaser" onClick={(e) => scrollToId(e, 'teaser')} className="btn-outline px-6 py-3.5 text-[15px] text-center">See it slide</a>

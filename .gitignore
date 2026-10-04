@@ -1,54 +1,21 @@
-# Unity-generated folders (rebuilt automatically when the project opens)
-/[Ll]ibrary/
-/[Tt]emp/
-/[Oo]bj/
-/[Ll]ogs/
-/[Uu]ser[Ss]ettings/
-/[Mm]emoryCaptures/
-/[Rr]ecordings/
+# Godot's editor cache (rebuilt automatically when the project opens)
+/.godot/
 
 # Game builds
-/[Bb]uild/
 /[Bb]uilds/
 
-# IDE / generated project files
-*.csproj
-*.sln
-*.slnx
-*.suo
-*.user
-*.userprefs
-*.pidb
-*.pdb
-*.mdb
-*.opendb
-*.VC.db
-*.pidb.meta
-*.pdb.meta
-*.mdb.meta
+# Editor / OS clutter
 .vscode/
 .idea/
-
-# Misc
-sysinfo.txt
-crashlytics-build.properties
+.DS_Store
 __pycache__/
 
 # Source-art zip downloads (the extracted folders are kept)
 /art-work/*.zip
+/art-work/downloaded-attrbutions/*.zip
 
-# Unity crash dumps and stray build output
-mono_crash.*
-/Data/
+# Sounds left over from the Unity version, kept locally for reference (the ones the game uses are in sounds/)
+/art-work/unity-sounds/
 
 # Blender auto-backups
 *.blend1
-
-# Downloaded asset zips (the extracted folders are kept)
-/art-work/downloaded-attrbutions/*.zip
-
-# Snag tracer output (rewritten every run)
-snag-trace.log
-
-# Godot editor cache (rebuilt automatically when the project opens)
-/godot/.godot/

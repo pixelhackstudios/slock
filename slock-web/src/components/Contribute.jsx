@@ -38,10 +38,10 @@ export default function Contribute() {
               <span className="badge mb-4"><span className="dot-gold"></span>Build it yourself</span>
               <div className="rounded-xl border border-(--border-soft) bg-(--ink-950) p-4 font-mono text-[12px] sm:text-[13px] leading-relaxed sm:leading-loose text-(--ink-100) overflow-x-auto">
                 <div className="term-line break-all sm:break-normal"><span className="term-prompt">$ </span>git clone {REPO}.git</div>
-                <div className="term-line text-(--ink-400)"># open it in Unity 6.6, then</div>
-                <div className="term-line text-(--ink-400)"># Slock → Build Windows / Mac / Linux</div>
+                <div className="term-line text-(--ink-400)"># open it in Godot 4.7 and press F5 to play,</div>
+                <div className="term-line text-(--ink-400)"># or Project → Export for Windows / Mac / Linux</div>
               </div>
-              <a href={`${REPO}#build-it`} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex text-[13px] font-medium text-(--slorm-300) hover:text-(--slorm-200) transition-colors">
+              <a href={`${REPO}#play-from-source-or-build-it`} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex text-[13px] font-medium text-(--slorm-300) hover:text-(--slorm-200) transition-colors">
                 Full build instructions →
               </a>
             </div>

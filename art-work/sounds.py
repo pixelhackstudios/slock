@@ -4,11 +4,9 @@ Synthesise Slock's sound effects (how loud each plays is set in the game's sound
     python3 art-work/sounds.py SlugClick SlugReload BigPop      (from the project folder; needs numpy)
 
 Builds only the clips named (so it never overwrites sounds made elsewhere); with none, lists them. Clips go to
-godot/sounds/ (the Pellet ones to the Unity project, Assets/Resources/Slock/Sounds/, which still uses them).
+sounds/. (The pellet pops themselves were made in Audacity.)
 
-Pellet1 .. Pellet6   a jelly bubble "pop" with a short, round tone under it. Notes, picked by ear:
-                     G#1 F2 A2 C3 A3 B3. Each pellet plays one at random, slightly detuned.
-BigPop               the same pop, bigger and lower: a power pellet or a pellet powerup.
+BigPop               a big jelly bubble "pop" with a round tone under it: a power pellet or a pellet powerup.
 SlugClick            one slug picked up: a clip snapping in (a metallic slide-clack, then the lock click).
 SlugReload           slugs refilled: a quick reload, three fast clicks into the final clack.
 """
@@ -19,9 +17,7 @@ import wave
 import numpy as np
 
 SR = 44100
-GODOT = os.path.join("godot", "sounds")
-UNITY = os.path.join("Assets", "Resources", "Slock", "Sounds")
-NOTES = [51.91, 87.31, 110.00, 130.81, 220.00, 246.94]  # Hz
+OUT = "sounds"
 
 
 def lowpass(sig, hz):
@@ -35,7 +31,7 @@ def lowpass(sig, hz):
 
 
 def pellet(f, seed, size=1.0, length=0.25):
-    """The bubble pop. `size` stretches its decays: bigger bubbles ring longer."""
+    """A bubble pop at pitch `f`. `size` stretches its decays: bigger bubbles ring longer."""
     rng = np.random.default_rng(seed)
     t = np.arange(int(SR * length)) / SR
     # Tone: a water-drop bloop (pitch glides up a few percent in the first ~35 ms), kept low under the pop.
@@ -106,10 +102,9 @@ def save(path, sig):
 
 
 CLIPS = {
-    **{f"Pellet{i + 1}": (UNITY, lambda f=f, i=i: pellet(f, i)) for i, f in enumerate(NOTES)},
-    "BigPop": (GODOT, lambda: pellet(65.41, 3, size=2.2, length=0.4)),  # C2, rings about twice as long
-    "SlugClick": (GODOT, slug_click),
-    "SlugReload": (GODOT, slug_reload),
+    "BigPop": lambda: pellet(65.41, 3, size=2.2, length=0.4),  # C2, ringing about twice as long as a pellet pop
+    "SlugClick": slug_click,
+    "SlugReload": slug_reload,
 }
 
 if __name__ == "__main__":
@@ -117,8 +112,7 @@ if __name__ == "__main__":
     if not names:
         print("Name the clips to build:", " ".join(CLIPS))
     for name in names:
-        folder, make = CLIPS[name]
-        os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, name + ".wav")
-        save(path, make())
+        os.makedirs(OUT, exist_ok=True)
+        path = os.path.join(OUT, name + ".wav")
+        save(path, CLIPS[name]())
         print(path)

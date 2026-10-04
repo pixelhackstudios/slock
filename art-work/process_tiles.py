@@ -1,63 +1,43 @@
 """
-Turn the PBR texture sets in this folder into Unity-ready tile textures.
+Turn the PBR texture sets in this folder into the game's tile textures, in textures/.
 
     python3 art-work/process_tiles.py        (run from the project folder)
 
-Two tile themes, each written to its own folder under Assets/Textures/ (in game, press T to switch between them):
-    Tiles  <- the TextureMap.app sets:   slock-floor-pbr*/, slock-tops-pbr*/, slock-walls-pbr*/
-    SciFi  <- slock-sample-textures/:    see THEMES below for which folder feeds floor / tops / walls / ramps / gate
+The sets: slock-floor-pbr*/, slock-tops-pbr*/, slock-walls-pbr*/ (made with TextureMap.app).
 
 Works at any image size. Each image is one whole block face: floor = one floor block, tops = the top of a wall
-block, walls = one side of a wall block, ramps = one block of ramp surface, gate = one face of the locked gate. It keeps the source resolution
-(rounded up to a power of two, which Unity prefers) and writes, per surface:
-    <kind>_base.png         colour (falls back to the grey AO map if a set has no colour image); alpha = opacity map, if any
-    <kind>_normal.png       normal map (OpenGL +Y, which is what Unity expects)
-    <kind>_metalsmooth.png  URP Lit "metallic" map: R = metallic, A = smoothness (1 - roughness)
+block, walls = one side of a wall block. It keeps the source resolution (rounded up to a power of two) and writes,
+per surface:
+    <kind>_base.png         colour (falls back to the grey AO map if a set has no colour image)
+    <kind>_normal.png       normal map (OpenGL +Y, which is what Godot expects)
     <kind>_ao.png           ambient occlusion
-    <kind>_emission.png     glow map, only if the set has one
-Then in Unity use the menu: Slock > Create Tile Materials (makes/updates the materials that point at these).
+Godot picks them up the next time the project opens (section.gd makes the materials).
 
 To use only part of an image, change its crop below: (left, top, right, bottom) as fractions of the image size.
 """
 import glob
 import os
 
-import numpy as np
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TEXTURES = os.path.join(HERE, "..", "Assets", "Textures")
+TEXTURES = os.path.join(HERE, "..", "textures")
 
 # Each image is one whole block face, so by default nothing is trimmed: (left, top, right, bottom) fractions.
 CROPS = {
     "floor": (0.0, 0.0, 1.0, 1.0),   # one floor block
     "tops": (0.0, 0.0, 1.0, 1.0),    # the top of one wall block
     "walls": (0.0, 0.0, 1.0, 1.0),   # one side face of a wall block
-    "ramps": (0.0, 0.0, 1.0, 1.0),   # one block of ramp surface
-    "gate": (0.0, 0.0, 1.0, 1.0),    # one face of the locked gate (see-through where the opacity map is dark)
 }
 
-# theme -> {surface: source folder}. Folders missing on disk are skipped.
-THEMES = {
-    "Tiles": {kind: (glob.glob(os.path.join(HERE, f"slock-{kind}-pbr*/")) or [None])[0] for kind in ("floor", "tops", "walls")},
-    "SciFi": {
-        "floor": os.path.join(HERE, "slock-sample-textures", "sci-fi-floors"),
-        "tops": os.path.join(HERE, "slock-sample-textures", "sci-fi-metal-tops"),
-        "walls": os.path.join(HERE, "slock-sample-textures", "sci-f-metal-plate"),
-        "ramps": os.path.join(HERE, "slock-sample-textures", "sci-fi-ramps"),
-        "gate": os.path.join(HERE, "slock-sample-textures", "sci-fi-gates"),
-    },
-}
+# surface -> source folder. Folders missing on disk are skipped.
+SETS = {kind: (glob.glob(os.path.join(HERE, f"slock-{kind}-pbr*/")) or [None])[0] for kind in ("floor", "tops", "walls")}
 
 # Map name fragments, covering both TextureMap.app ("ambient-occlusion-map") and Substance-style ("_ambientOcclusion").
 MAPS = {
     "base": ["basecolor"],
     "ao": ["ambient-occlusion", "ambientOcclusion"],
     "normal": ["normal"],
-    "metallic": ["metallic"],
-    "roughness": ["roughness"],
-    "emission": ["emissive", "emission"],
-    "opacity": ["opacity"],
 }
 
 
@@ -82,8 +62,8 @@ def find(folder, map_name, kind):
     return None
 
 
-def process(theme, kind, folder):
-    out = os.path.join(TEXTURES, theme)
+def process(kind, folder):
+    out = TEXTURES
     os.makedirs(out, exist_ok=True)
     ao_file = find(folder, "ao", kind)
     w, h = Image.open(ao_file).size
@@ -97,26 +77,14 @@ def process(theme, kind, folder):
     ao = load(ao_file).convert("L")
     base = find(folder, "base", kind)
     colour = load(base).convert("RGB") if base else ao.convert("RGB")
-    opacity = find(folder, "opacity", kind)
-    if opacity:
-        colour.putalpha(load(opacity).convert("L"))
     colour.save(os.path.join(out, f"{kind}_base.png"))
     ao.save(os.path.join(out, f"{kind}_ao.png"))
     load(find(folder, "normal", kind)).convert("RGB").save(os.path.join(out, f"{kind}_normal.png"))
-    metal_file = find(folder, "metallic", kind)
-    metal = load(metal_file).convert("L") if metal_file else Image.new("L", (size, size), 0)   # none: not metal
-    smooth = Image.fromarray(255 - np.asarray(load(find(folder, "roughness", kind)).convert("L")))
-    Image.merge("RGBA", (metal, metal, metal, smooth)).save(os.path.join(out, f"{kind}_metalsmooth.png"))
-    glow = find(folder, "emission", kind)
-    if glow:
-        load(glow).convert("RGB").save(os.path.join(out, f"{kind}_emission.png"))
-    print(f"{theme}/{kind}: {w}x{h} -> {size}x{size}, colour from {os.path.basename(base) if base else 'AO map'}"
-          f"{', + glow' if glow else ''}{', + opacity' if opacity else ''}")
+    print(f"{kind}: {w}x{h} -> {size}x{size}, colour from {os.path.basename(base) if base else 'AO map'}")
 
 
-for theme, kinds in THEMES.items():
-    for kind, folder in kinds.items():
-        if not folder or not os.path.isdir(folder):
-            print(f"{theme}/{kind}: no set found, skipped")
-            continue
-        process(theme, kind, folder)
+for kind, folder in SETS.items():
+    if not folder or not os.path.isdir(folder):
+        print(f"{kind}: no set found, skipped")
+        continue
+    process(kind, folder)

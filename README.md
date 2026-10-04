@@ -36,12 +36,13 @@ Eat every pellet in a section to open its gate, go through, and keep climbing be
 |---|---|
 | **Mouse** (or gamepad left stick) | Tilt the world |
 | **Left click** | Aim a slug — click again to fire |
-| **Esc** | Pause (and change control settings) |
+| **Esc** | Pause |
 | **R** | Restart |
 
 ### Moving
 
-- Tilt gently to **creep**; tilt hard to **slide**. Tilt the other way to slow down.
+- Tilt gently to **creep**; tilt hard to **slide**. Level the board and Slock stops. The dial in the corner shows
+  your tilt: inside its small ring is level.
 - Slock runs along the corridors and turns into side openings when you tilt toward them — but come in too fast and you'll slide right past.
 - **Holes and open edges are deadly.** Fall off and the run is over.
 
@@ -52,24 +53,24 @@ You start with **35 seconds**. Keep it topped up:
 | | |
 |---|---|
 | Blue pellet | +1 second |
-| Small yellow pellet | +2 seconds |
-| Clock pickup | +20 seconds |
+| Gold pellet (side rooms) | +2 seconds |
+| Clock (side rooms) | +20 seconds |
 | Getting through a gate | Bonus time |
 
-### Slorms
+### Swurms
 
-Green worms that crawl out of the pen in the middle of each section, **one at a time**. There's one more of them in every new section.
+Green jelly worms that crawl out of the pen in the middle of each section, **one at a time**. There's one more of them in every new section.
 
-- **Touch one and it steals a third of your time**, and you bounce about 3 tiles apart.
-- **Grab a power gem** and they turn **blue** for 10 seconds (+5 seconds on your clock). Blue Slorms are slow — **eat them** for **+10 seconds**, plus all the time they stole from you.
+- **Touch one and it steals a third of your time**, and you bounce apart.
+- **Grab a big gold power pellet** and they turn **blue** for 10 seconds (+5 seconds on your clock). Blue Swurms are slow — **eat them** for **+10 seconds**, plus all the time they stole from you.
 
 ### Slugs (emergency only)
 
 You start with **3 slugs**. Each gate gives back what you used, **plus one more**.
 
 1. **Click** — the game freezes and you're in aim mode. **There's no backing out.**
-2. **Tilt** to aim. The one thing you'll hit glows **red**: a Slorm, or an inner wall block, up to **4 tiles** away.
-3. **Click** again to fire. A Slorm is destroyed (+10 seconds plus its stolen time) or a wall block is blasted open.
+2. **Tilt** to aim. The one thing you'll hit glows **red**: a Swurm, or an inner wall block, up to **4 tiles** away.
+3. **Click** again to fire. A Swurm is destroyed (+10 seconds plus its stolen time) or a wall block is blasted open.
 
 Outer walls can't be broken. A missed shot is still a used slug — save them.
 
@@ -80,7 +81,7 @@ Each section has three powerups scattered at random, and they work the moment yo
 | | |
 |---|---|
 | Three blue dots | A quarter of the section's pellets vanish (at most one per section) |
-| Steel block | **Slock of Steel** for 10 seconds: push into an inner wall to smash it, and Slorms you hit are smashed too |
+| Steel block | **Slock of Steel** for 10 seconds: push into an inner wall to smash it, and Swurms you hit are smashed too |
 | Three slugs | Slugs refilled |
 | One big slug | One extra slug |
 | Green patch | Every hole is filled in and every gap in the outer walls is closed off, in the section and its side room (at most one per section) |
@@ -89,20 +90,28 @@ Each section has three powerups scattered at random, and they work the moment yo
 
 - The gate at the far end opens when you've **eaten every pellet** in the section — or found its **key**.
 - Once you're through, the way back seals behind you.
-- Every section is bigger, with **smaller blocks**, more Slorms and more holes. Slock shrinks to fit.
+- Every section has **smaller blocks** (so more of them), more Swurms and more holes. Slock shrinks to fit.
+- Some sections have a **side room** down a ramp off the left wall: gold pellets, and a clock or the gate's key.
 
-## What you need
+## Play from source, or build it
 
-- **Unity 6000.6.3f1** (Unity 6.6), installed through [Unity Hub](https://unity.com/download). The free Personal licence is fine.
-- The **Build Support** module for the platform you're building for (for example *Linux Build Support*), added in Unity Hub under *Installs → Add modules*.
+Slock is made with **[Godot 4.7](https://godotengine.org/download)** — free and open source, nothing to sign up for.
+The standard build is all you need (not the .NET one: the game is written in GDScript).
 
-## Build it
+1. Open Godot, click **Import**, and choose this folder's `project.godot`.
+2. Press **F5** (or the ▶ button) to play.
 
-1. In Unity Hub, click **Add → Add project from disk** and choose this folder, then open it.
-2. In the Unity menu bar, choose **Slock → Build Linux**, **Build Windows** or **Build Mac**.
-   Each build is written to `Builds/<platform>/`.
+To make a build you can share, use **Project → Export** (Godot offers to download its export templates the first
+time). Builds go in `Builds/`, which git ignores.
 
-To just play it in the editor, open `Assets/Scenes/SampleScene` and press **▶ Play**.
+### Where things are
+
+| | |
+|---|---|
+| `scripts/` | The game, in GDScript: `main.gd` runs a run, `section.gd` builds each section from the layout `maze_gen.gd` generates, `slock.gd` is the block you tilt |
+| `textures/`, `models/`, `sounds/` | The art the game uses |
+| `art-work/` | Source art, and the scripts that turn it into the above (`process_tiles.py`, `sounds.py`) |
+| `slock-web/` | The website |
 
 ## Contributing
 

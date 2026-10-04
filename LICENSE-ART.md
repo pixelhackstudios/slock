@@ -9,8 +9,8 @@ You may share and adapt them for any purpose, including commercially, as long as
 ## What counts as art
 
 - Everything in `art-work/`
-- Everything in `Assets/Textures/`
-- The models, textures and sounds in `Assets/Resources/Slock/` (`.fbx`, `.png` and `.wav` files)
+- The tile textures in `textures/`, the model in `models/` and the sounds in `sounds/` (`.png`, `.fbx` and `.wav`
+  files)
 
 All other files are source code, covered by the MIT licence in `LICENSE`.
 

@@ -14,7 +14,7 @@ from mathutils import Vector, Quaternion, Euler
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "Builds" / "Trailer"
-TEX = ROOT / "Assets" / "Textures" / "Tiles"
+TEX = ROOT / "textures"
 FONT_PATHS = ["/run/host/usr/share/fonts/truetype/noto/NotoSansDisplay-CondensedBlack.ttf",
               "/usr/share/fonts/truetype/noto/NotoSansDisplay-CondensedBlack.ttf"]
 
