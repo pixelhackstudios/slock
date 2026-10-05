@@ -2,7 +2,7 @@
 
 https://pixelhackstudios.github.io/slock/ — one page that shows the game, made from the game itself: the maze, pellets,
 pickups and Swurms are the game's own models and textures, exported from the real game code, and Slock slides by the
-game's rules (mouse, or a phone's tilt). Scrolling moves the camera from shot to shot.
+game's rules, played by an autopilot in the background. Scrolling moves the camera from shot to shot.
 
 Built with [Vite](https://vite.dev), [three.js](https://threejs.org) and [Lenis](https://lenis.darkroom.engineering).
 GitHub builds and publishes it whenever `website/` changes on `main` (`.github/workflows/pages.yml`).
@@ -24,9 +24,9 @@ Then open the address it prints (http://localhost:5173/slock/).
 | | |
 |---|---|
 | `index.html`, `src/styles.css` | The page: its words and its look |
-| `src/main.js` | Scrolling, the mouse and phone tilt, the download buttons (`src/downloads.js`) |
+| `src/main.js` | Scrolling, and the download buttons (`src/downloads.js`) |
 | `src/director.js` | Where the camera looks for each part of the page |
-| `src/world/` | The game's world in three.js: the look (`look.js`, ported from the game's materials and shaders), the sections, Slock and how it moves (`slock.js`), the Swurms, and the autopilot that plays when nobody's steering |
+| `src/world/` | The game's world in three.js: the look (`look.js`, ported from the game's materials and shaders), the sections, Slock and how it moves (`slock.js`), the Swurms, and the autopilot that plays it |
 | `public/world/` | Exported from the game (don't edit by hand; see below) |
 | `public/media/` | The film of a run, recorded in the game |
 

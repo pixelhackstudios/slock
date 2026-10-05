@@ -16,7 +16,6 @@ const POWER_FLASH = 2
 const HIT_REACH = 0.9
 const HIT_COOLDOWN = 1
 const SWURM_RESPAWN = 8
-const IDLE_AUTOPILOT = 4          // seconds without input before the autopilot takes over again
 const WIDEST = 1.9                // the shots are framed for screens up to this wide; wider ones show more void
 
 export class World {
@@ -66,13 +65,10 @@ export class World {
     this.sun = light(this.scene, this.renderer)
     this.sun.shadow.mapSize.set(shadowSize, shadowSize)
     this.now = 0
-    this.stick = new THREE.Vector2()   // where the player's hand is (see steer), -1..1
-    this.hand = new THREE.Vector2()    // whoever's hand is on the board this frame (the player's or the autopilot's)
-    this.steering = false              // the player has the board (otherwise the autopilot does, if on)
+    this.hand = new THREE.Vector2()    // the autopilot's hand on the board this frame, -1..1
     this.autopilotOn = true
     this.score = 0
     this.events = new EventTarget()    // 'eat', 'power', 'fall', 'hit', 'chomp'
-    this._lastInput = -Infinity
     this._powerUntil = 0
     this._hitUntil = new Map()
     this._shift = [0, 0]
@@ -130,14 +126,6 @@ export class World {
     this.events.dispatchEvent(new CustomEvent(type, { detail }))
   }
 
-  /** The player's hand: a stick position (each axis -1..1), as from the mouse. */
-  steer(x, y) {
-    this.stick.set(x, y)
-    if (this.stick.length() > 1) this.stick.normalize()
-    this.steering = true
-    this._lastInput = this.now
-  }
-
   resize(width, height) {
     this.size.set(width, height)
     const dpr = this.renderer.getPixelRatio()
@@ -185,12 +173,11 @@ export class World {
     const now = (this.now += dt)
     this.frame.time.value = now
 
-    // The hand on the board: the player's, else (after a while) the autopilot's, else nobody's.
+    // The hand on the board: the autopilot's (the page plays itself; visitors just watch).
     let want = new THREE.Vector2()
     this.hand = new THREE.Vector2()
-    if (view.play) {
-      if (this.steering && now - this._lastInput > IDLE_AUTOPILOT) this.steering = false
-      const hand = this.steering ? this.stick : (this.autopilotOn ? this.autopilot.stick(now) : null)
+    if (view.play && this.autopilotOn) {
+      const hand = this.autopilot.stick(now)
       if (hand) {
         this.hand.copy(hand)
         const mag = hand.length()

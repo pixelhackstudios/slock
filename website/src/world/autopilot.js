@@ -1,4 +1,4 @@
-// Plays Slock while nobody else is: finds the nearest pellet through the maze and tilts the board to slide there,
+// Plays Slock in the background of the page: finds the nearest pellet through the maze and tilts the board to slide there,
 // leaning into each turn as Slock reaches it, the way a player does.
 import * as THREE from 'three'
 import { FLOOR, LEVEL, VOID } from './section.js'

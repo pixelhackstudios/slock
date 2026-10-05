@@ -11,7 +11,6 @@ import { World } from './world/world.js'
 const root = document.documentElement
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
 const touch = matchMedia('(pointer: coarse)').matches
-root.classList.add(touch ? 'touch' : 'mouse')
 setupDownloads()
 
 // ------------------------------------------------------------------ scrolling
@@ -93,27 +92,6 @@ async function start(world) {
   addEventListener('resize', resize)
   document.fonts.ready.then(() => director.measure())
   setTimeout(() => world.loadCourse(), 1500)
-
-  // The mouse tilts the board: where it is on the screen, like a stick (full tilt a little short of the edges).
-  addEventListener('pointermove', (e) => {
-    if (e.pointerType !== 'mouse') return
-    world.steer(((e.clientX / innerWidth) * 2 - 1) * 1.3, (1 - (e.clientY / innerHeight) * 2) * 1.3)
-  })
-  // On a phone, tilting the phone tilts it.
-  for (const button of document.querySelectorAll('.tilt-phone')) {
-    button.addEventListener('click', async () => {
-      const ask = globalThis.DeviceOrientationEvent?.requestPermission
-      if (ask && (await ask().catch(() => 'denied')) !== 'granted') return
-      let rest = null
-      addEventListener('deviceorientation', (e) => {
-        if (e.beta == null) return
-        rest ??= { beta: e.beta, gamma: e.gamma }
-        world.steer((e.gamma - rest.gamma) / 22, (rest.beta - e.beta) / 22)
-      })
-      button.textContent = 'Tilt your phone'
-      button.disabled = true
-    })
-  }
 
   const dials = [...document.querySelectorAll('.dial')]
   const states = [...document.querySelectorAll('.states li')]

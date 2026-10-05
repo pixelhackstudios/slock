@@ -49,9 +49,6 @@ a { color: inherit; }
 h1, h2, h3 { margin: 0; font-weight: 400; }
 p { margin: 0 0 1em; }
 
-.if-touch { display: none; }
-.touch .if-touch { display: revert; }
-.touch .if-mouse { display: none; }
 
 /* ------------------------------------------------------------------ the world, behind everything */
 
@@ -223,9 +220,6 @@ main, .bar, .foot { position: relative; z-index: 1; }
 .btn:hover { transform: scale(1.04, 0.97); background-color: #ff5265; }
 .btn:active { transform: scale(1.1, 0.88); transition-duration: 0.08s; }
 
-.hint { display: flex; align-items: center; gap: 14px; max-width: 20rem; }
-.hint-text { margin: 0; font-family: var(--mono); font-size: 0.75rem; line-height: 1.5; letter-spacing: 0.04em; color: var(--grout); }
-
 .dial { width: 76px; height: 76px; flex: none; overflow: visible; }
 .dial-face { fill: rgba(0, 0, 0, 0.35); stroke: rgba(255, 255, 255, 0.25); stroke-width: 1.5; }
 .dial-cross { stroke: rgba(255, 255, 255, 0.25); stroke-width: 1; }
@@ -233,15 +227,6 @@ main, .bar, .foot { position: relative; z-index: 1; }
 .dial-dot { fill: #fff; }
 .dial.level .dial-dot { fill: #59f28c; }
 
-.tilt-phone {
-  font: inherit;
-  color: var(--porcelain);
-  background: none;
-  border: 1px solid var(--grout);
-  border-radius: 9px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
 
 /* ------------------------------------------------------------------ chapters over the world */
 
@@ -442,8 +427,6 @@ kbd {
   .hero { padding-top: 76px; }
   .wordmark { font-size: 27vw; }
   .hero-foot { flex-direction: column; align-items: flex-start; }
-  .hint { display: none; }
-  .touch .hint { display: flex; }
   .chapter { align-items: flex-end; padding-bottom: 8vh; }
   .sticky { align-items: flex-end; padding-bottom: 8vh; }
   .copy, .copy--right { max-width: none; margin-left: 0; }
