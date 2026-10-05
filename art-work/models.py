@@ -5,7 +5,8 @@ Slock's 3D models, built from scratch in Blender: the maze kit the sections are 
     python3 art-work/models.py [options]          (with Blender's Python module: pip install bpy)
 
 Options:
-    --only kit|textures|pickups     build just that part (default: everything)
+    --only PART[,PART...]           build just those parts: kit, textures, pickups, or one texture set by name
+                                    (default: everything)
     --quick                         low sample counts, for a fast look
     --preview DIR                   also render a preview of each model into DIR
 
@@ -14,11 +15,13 @@ It writes:
                                         wall_cap    a wall block's top, rounded over its edges
                                         wall_side   one side face, between the rounded corners
                                         wall_edge   one rounded vertical corner
+                                        wall_stop   closes the band's channel at a face against another block
                                         wall_plug   fills the dimple where four wall blocks meet
                                         floor       one floor tile
     textures/maze/<set>_*.png       their textures, baked from detailed models of each surface: _albedo (colour),
                                     _normal (OpenGL, +Y up) and _orm (ambient occlusion, roughness, metallic), plus
-                                    _emission for the pen. Sets: floor, ramp, pen, wall, cap, cliff
+                                    _emission for the pen and the walls' pipes. Sets: floor, ramp, pen, wall, cap,
+                                    cliff
     models/<pickup>.glb             the powerups and pickups, with their materials: clear_dots, steel, slug_pack,
                                     extra_slug, close_traps, clock, key, slug, gate, chevron
 
@@ -39,12 +42,16 @@ MODELS = os.path.join(ROOT, "models")
 TEXTURES = os.path.join(ROOT, "textures", "maze")
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
-ONLY = ARGS[ARGS.index("--only") + 1] if "--only" in ARGS else None
+ONLY = ARGS[ARGS.index("--only") + 1].split(",") if "--only" in ARGS else None
 QUICK = "--quick" in ARGS
 PREVIEW = ARGS[ARGS.index("--preview") + 1] if "--preview" in ARGS else None
 
 TEX_SIZE = 1024
-RIM = 0.06                       # wall blocks: radius of the rounding on their top and vertical edges
+RIM = 0.06                       # wall blocks: radius of the rounding on their top and vertical edges ...
+BAND = 0.1925                    # ... half the height of the band round their middles ...
+INSET = 0.04                     # ... and how far it's set into them
+LEDGE_V = 0.01                   # where the band's ledges take their texture from (v): the strip of plain panel at the
+                                 # top of the wall texture, above the face (which starts at v = RIM)
 
 
 # ------------------------------------------------------------------------------------------------- helpers
@@ -322,7 +329,23 @@ def bake_pass(sc, which, ao_distance=0.1):
                 return (v, v, v, 1.0)
         elif which == "emit":
             def src(nodes, links, m=m):
-                return tuple(m["emit"]) + (1.0,)
+                c = tuple(m["emit"]) + (1.0,)
+                if "emit_edge" not in m:
+                    return c
+                # Glowing glass: brightest where it faces the camera, shading to emit_edge towards its sides.
+                geo = nodes.new("ShaderNodeNewGeometry")
+                split = nodes.new("ShaderNodeSeparateXYZ")
+                facing = nodes.new("ShaderNodeMath")
+                facing.operation = "POWER"
+                facing.inputs[1].default_value = 4.0
+                mix = nodes.new("ShaderNodeMix")
+                mix.data_type = "RGBA"
+                mix.inputs["A"].default_value = tuple(m["emit_edge"]) + (1.0,)
+                mix.inputs["B"].default_value = c
+                links.new(geo.outputs["Normal"], split.inputs["Vector"])
+                links.new(split.outputs["Z"], facing.inputs[0])
+                links.new(facing.outputs["Value"], mix.inputs["Factor"])
+                return mix.outputs["Result"]
         elif which == "normal":
             def src(nodes, links):
                 geo = nodes.new("ShaderNodeNewGeometry")
@@ -441,39 +464,63 @@ def floor_surface():
     return obs
 
 
+def open_ends(ob):
+    """Remove a strip's end faces where it meets its copies in a tiling texture (at x = +-0.5), so a bevel leaves no
+    groove there."""
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    ends = [f for f in bm.faces if abs(f.normal.x) > 0.99 and abs(abs(f.calc_center_median().x) - 0.5) < 1e-4]
+    bmesh.ops.delete(bm, geom=ends, context="FACES")
+    bm.to_mesh(ob.data)
+    bm.free()
+    return ob
+
+
+def strip(name, y0, y1, z0, z1, mat, edge=0.0):
+    """A strip right across a tiling texture, from y0 to y1, its long edges rounded by `edge` (not its ends, where it
+    meets its copies)."""
+    ob = open_ends(prism(name, [(-0.5, y0), (0.5, y0), (0.5, y1), (-0.5, y1)], z0, z1, mat))
+    if edge > 0:
+        bevel(ob, edge)
+        apply_modifiers(ob)
+    return ob
+
+
 def wall_surface():
     """One side of a wall block, standing up the image (its foot at the bottom, the floor in front of it): a pale
-    panel crossed by dark conduits, with blue square bolts where they meet, and a darker kick plate along the foot.
-    The face runs from the floor up to the wall's rounded top edge (RIM below the top of the image); its left and
-    right edges wrap round the block's rounded corners."""
-    panel = material("panel", srgb(0.8, 0.8, 0.79), rough=0.55, vary=0.0)
-    conduit = material("conduit", srgb(0.3, 0.31, 0.33), rough=0.4, metal=0.6, grime=0.4)
-    bolt = material("bolt", srgb(0.3, 0.56, 0.78), rough=0.32, grime=0.3)
-    bolt_rim = material("bolt_rim", srgb(0.12, 0.22, 0.33), rough=0.45, grime=0.3)
-    kick = material("kick", srgb(0.6, 0.6, 0.6), rough=0.6)
+    panel with a band of tread plate across its middle, like the booster ramps' but finer and a lighter steel, set
+    INSET into the block (the maze kit's sides and edges are shaped to match), and along the band a glass pipe sunk in
+    a channel, glowing like the boosters' chevrons. The face runs from the floor up to the wall's rounded top edge (RIM
+    below the top of the image); its left and right edges wrap round the block's rounded corners, and the band carries
+    on round them. The band's ledges take their look from the plain panel above the face."""
+    panel = material("panel", srgb(0.8, 0.8, 0.79), rough=0.55)
+    groove = material("groove", srgb(0.12, 0.12, 0.13), rough=0.8, grime=0.5)
+    plate = material("plate", srgb(0.53, 0.54, 0.58), rough=0.4, metal=0.3, grime=0.6)
+    glass = material("glass", srgb(1.0, 0.55, 0.1), rough=0.12, emit=srgb(1.0, 1.0, 0.25), strength=1.0, grime=0.0)
+    glass["emit_edge"] = srgb(1.0, 0.51, 0.17)[:3]   # its glow deepens from yellow to orange towards its sides
     floor = material("floor", srgb(0.85, 0.85, 0.83), rough=0.5)
     foot = -0.5                                  # the floor line (image bottom)
-    top = 0.5 - RIM                              # where the rounded top edge begins
-    mid = (foot + top) * 0.5
-    obs = [prism("panel", [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)], -0.05, 0.0, panel)]
+    plate_h = BAND - 0.005                       # the plate's half height, inside a dark seam
+    pipe, channel = 0.032, 0.045                 # the pipe's radius, and its channel's half width
+    obs = [strip("panel", -0.6, -BAND, -0.1, 0.0, panel, edge=0.003),   # below and above the band, standing proud
+           strip("panel", BAND, 0.6, -0.1, 0.0, panel, edge=0.003),
+           strip("groove", -BAND - 0.01, BAND + 0.01, -0.1, -INSET - 0.03, groove),
+           strip("plate", -plate_h, -channel, -INSET - 0.006, -INSET, plate, edge=0.0015),
+           strip("plate", channel, plate_h, -INSET - 0.006, -INSET, plate, edge=0.0015),
+           cylinder("pipe", pipe, 1.0, 32, glass, location=(0, 0, -INSET - pipe), rotation=(0, math.radians(90), 0))]
+    n = 16                                       # lugs across, in a herringbone, two rows either side of the pipe
+    middle = (channel + plate_h) * 0.5
+    rows = (-middle - 0.03125, -middle + 0.03125, middle - 0.03125, middle + 0.03125)
+    lug = [(0.02, 0), (0, 0.0055), (-0.02, 0), (0, -0.0055)]   # a long thin diamond, half the ramp's
+    for i in range(n):
+        for j, cy in enumerate(rows):
+            cx = -0.5 + (i + 0.5) / n
+            a = math.radians(45 if (i + j) % 2 == 0 else -45)
+            pts = [(cx + x * math.cos(a) - y * math.sin(a), cy + x * math.sin(a) + y * math.cos(a)) for x, y in lug]
+            obs.append(prism("lug", pts, -INSET, -INSET + 0.0035, plate, edge=0.0015))
     # The floor the wall stands on: seen edge-on by the camera, it only shades the foot of the wall.
-    floor_ob = mesh_object("floor", [(-0.5, foot, 0), (0.5, foot, 0), (0.5, foot, 0.6), (-0.5, foot, 0.6)],
-                           [(0, 1, 2, 3)], material=floor)
-    obs.append(floor_ob)
-    obs.append(prism("kick", [(-0.5, foot), (0.5, foot), (0.5, foot + 0.07), (-0.5, foot + 0.07)], 0.0, 0.006,
-                     kick, edge=0.003))
-    cols = (-0.34, 0.0, 0.34)
-    rows = (mid - 0.31, mid, mid + 0.31)
-    for x in cols:   # conduits: rounded bars lying on the panel
-        obs.append(cylinder("conduit", 0.0065, rows[2] - rows[0], 12, conduit, location=(x, mid, 0.003)))
-        obs[-1].rotation_euler = (math.radians(90), 0, 0)
-    for y in rows:
-        obs.append(cylinder("conduit", 0.0065, cols[2] - cols[0], 12, conduit, location=(0, y, 0.003),
-                            rotation=(0, math.radians(90), 0)))
-    for x in cols:
-        for y in rows:
-            obs.append(rounded_box("bolt_rim", (0.056, 0.056, 0.016), 0.009, 2, bolt_rim, location=(x, y, 0.004)))
-            obs.append(rounded_box("bolt", (0.043, 0.043, 0.026), 0.008, 3, bolt, location=(x, y, 0.006)))
+    obs.append(mesh_object("floor", [(-0.5, foot, 0), (0.5, foot, 0), (0.5, foot, 0.6), (-0.5, foot, 0.6)],
+                           [(0, 1, 2, 3)], material=floor))
     return obs
 
 
@@ -562,7 +609,7 @@ def pen_surface():
 
 TEXTURE_SETS = {   # name -> (model, bake options)
     "floor": (floor_surface, dict(ao_distance=0.08, stains=0.03)),
-    "wall": (wall_surface, dict(tiles_y=False, ao_distance=0.12, seed=2, stains=0.025)),
+    "wall": (wall_surface, dict(tiles_y=False, ao_distance=0.12, emission=True, seed=2, stains=0.025)),
     "cap": (cap_surface, dict(tiles_x=False, tiles_y=False, ao_distance=0.08, seed=3, stains=0.02, mottle=0.015)),
     "cliff": (cliff_surface, dict(ao_distance=0.1, seed=4, stains=0.05)),
     "ramp": (ramp_surface, dict(ao_distance=0.05, seed=5, dirt=0.4, stains=0.05)),
@@ -575,14 +622,16 @@ TEXTURE_SETS = {   # name -> (model, bake options)
 # The pieces section.gd builds every maze block from, written out exactly (in Godot's axes) so their rounded edges
 # have true normals and every piece meets its neighbours edge for edge. They're lean (a cap is 42 triangles: the
 # deepest sections have a couple of thousand wall blocks), and the smooth normals do the rounding. A wall block is one
-# wall_cap, a wall_side for each face that isn't against another wall block as tall, a wall_edge on each corner unless
-# the three blocks round that corner are all walls (then a wall_plug closes the little dimple their rounded corners
-# leave). The block is
-# 1 x 1 x 1 standing on the floor (y = 0): the cap is its top RIM, rounded over, the sides and edges go from the
-# floor up to it. Pieces for one face or corner are made for the near face (+z) and the near-right corner (+x +z);
-# the game turns them for the others. UVs: the cap, plug and floor are mapped from above (u along x, v along z), the
-# sides from the front (u along x, v down), and the edges carry the side's u on round the corner, past 1 (the wall
-# texture tiles across).
+# wall_cap, a wall_side for each face that isn't against another wall block as tall (and for each face that is, a
+# wall_stop), a wall_edge on each corner unless the three blocks round that corner are all walls (then a wall_plug
+# closes the little dimple their rounded corners leave). The block is 1 x 1 x 1 standing on the floor (y = 0): the cap
+# is its top RIM, rounded over, the sides and edges go from the floor up to it, with a band round their middle set
+# INSET into the block. Where a face is against another block, the band's channel coming round the corners either
+# side of it would be open: the wall_stop closes its ends. Pieces for one face or corner are made for the near face
+# (+z) and the near-right corner (+x +z); the game turns them for the others. UVs: the cap, plug and floor are mapped
+# from above (u along x, v along z), the sides from the front (u along x, v down), and the edges carry the side's u on
+# round the corner, past 1 (the wall texture tiles across). The band's ledges and stops are mapped onto the plain
+# panel at the top of the wall texture (v LEDGE_V on), which the faces don't use.
 
 def _oriented(verts, faces, normals):
     """Faces wound so they face the way their vertex normals point (counter-clockwise seen from outside)."""
@@ -644,24 +693,65 @@ def kit_cap(rings=2, arc=2):
 
 def kit_side():
     h = 0.5 - RIM
-    verts = [(-h, 0.0, 0.5), (h, 0.0, 0.5), (h, 1.0 - RIM, 0.5), (-h, 1.0 - RIM, 0.5)]
-    normals = [(0.0, 0.0, 1.0)] * 4
-    uvs = [(x + 0.5, 1.0 - y) for x, y, z in verts]
-    return kit_piece("wall_side", verts, [(0, 1, 2, 3)], normals, uvs)
+    lo, hi, z0, z1 = 0.5 - BAND, 0.5 + BAND, 0.5, 0.5 - INSET
+    top = 1.0 - RIM
+    quads = [   # the panel below the band, the ledge under it, the band, the ledge over it, the panel above
+        ([(-h, 0.0, z0), (h, 0.0, z0), (h, lo, z0), (-h, lo, z0)], (0.0, 0.0, 1.0)),
+        ([(-h, lo, z0), (h, lo, z0), (h, lo, z1), (-h, lo, z1)], (0.0, 1.0, 0.0)),
+        ([(-h, lo, z1), (h, lo, z1), (h, hi, z1), (-h, hi, z1)], (0.0, 0.0, 1.0)),
+        ([(-h, hi, z1), (h, hi, z1), (h, hi, z0), (-h, hi, z0)], (0.0, -1.0, 0.0)),
+        ([(-h, hi, z0), (h, hi, z0), (h, top, z0), (-h, top, z0)], (0.0, 0.0, 1.0)),
+    ]
+    verts, normals, uvs, faces = [], [], [], []
+    for corners, normal in quads:
+        faces.append(tuple(range(len(verts), len(verts) + 4)))
+        for x, y, z in corners:
+            verts.append((x, y, z))
+            normals.append(normal)
+            uvs.append((x + 0.5, 1.0 - y if normal[1] == 0 else LEDGE_V + 0.5 - z))
+    return kit_piece("wall_side", verts, faces, normals, uvs)
 
 
 def kit_edge(arc=2):
     h = 0.5 - RIM
-    verts, normals, uvs = [], [], []
-    for j in range(arc + 1):
-        a = math.radians(90.0 * j / arc)                     # 0: facing +x ... 90: facing +z
-        u = 1.0 - RIM + 2.0 * RIM * (1.0 - j / arc)          # carries on from the near face's u, round to the right
-        for y in (0.0, 1.0 - RIM):
-            verts.append((h + RIM * math.cos(a), y, h + RIM * math.sin(a)))
-            normals.append((math.cos(a), 0.0, math.sin(a)))
-            uvs.append((u, 1.0 - y))
-    faces = [(2 * j, 2 * j + 2, 2 * j + 3, 2 * j + 1) for j in range(arc)]
+    lo, hi, inner = 0.5 - BAND, 0.5 + BAND, RIM - INSET
+    verts, normals, uvs, faces = [], [], [], []
+
+    def row(y, r, up=0.0):
+        """A row of points round the corner at height y, radius r: facing out, or (`up` +-1) up or down a ledge."""
+        ids = []
+        for j in range(arc + 1):
+            a = math.radians(90.0 * j / arc)                     # 0: facing +x ... 90: facing +z
+            u = 1.0 - RIM + 2.0 * RIM * (1.0 - j / arc)          # carries on from the near face's u, round to the right
+            verts.append((h + r * math.cos(a), y, h + r * math.sin(a)))
+            normals.append((0.0, up, 0.0) if up else (math.cos(a), 0.0, math.sin(a)))
+            uvs.append((u, LEDGE_V + RIM - r if up else 1.0 - y))
+            ids.append(len(verts) - 1)
+        return ids
+
+    def bridge(a, b):
+        faces.extend((a[j], a[j + 1], b[j + 1], b[j]) for j in range(arc))
+
+    bridge(row(0.0, RIM), row(lo, RIM))                          # the panel below the band
+    bridge(row(lo, RIM, 1.0), row(lo, inner, 1.0))               # the ledge under it
+    bridge(row(lo, inner), row(hi, inner))                       # the band
+    bridge(row(hi, inner, -1.0), row(hi, RIM, -1.0))             # the ledge over it
+    bridge(row(hi, RIM), row(1.0 - RIM, RIM))                    # the panel above
     return kit_piece("wall_edge", verts, faces, normals, uvs)
+
+
+def kit_stop():
+    h = 0.5 - RIM
+    lo, hi, z0, z1 = 0.5 - BAND, 0.5 + BAND, 0.5, 0.5 - INSET
+    verts, normals, uvs, faces = [], [], [], []
+    for sx in (1.0, -1.0):   # the near face's right end, and its left
+        faces.append((len(verts), len(verts) + 1, len(verts) + 3, len(verts) + 2))
+        for z in (z1, z0):
+            for y in (lo, hi):
+                verts.append((sx * h, y, z))
+                normals.append((sx, 0.0, 0.0))
+                uvs.append((0.5 + sx * (0.5 - z), LEDGE_V + INSET * (y - lo) / (hi - lo)))
+    return kit_piece("wall_stop", verts, faces, normals, uvs)
 
 
 def kit_plug():
@@ -694,7 +784,7 @@ def export_glb(path, objects, materials=True):
 
 def build_kit():
     reset()
-    pieces = [kit_cap(), kit_side(), kit_edge(), kit_plug(), kit_floor()]
+    pieces = [kit_cap(), kit_side(), kit_edge(), kit_stop(), kit_plug(), kit_floor()]
     export_glb(os.path.join(MODELS, "maze_kit.glb"), pieces, materials=False)
 
 
@@ -1105,12 +1195,14 @@ def preview(name, objects):
 
 
 def main():
-    if ONLY in (None, "kit"):
+    def wanted(*parts):
+        return ONLY is None or any(p in ONLY for p in parts)
+    if wanted("kit"):
         build_kit()
-    if ONLY in (None, "textures"):
-        for name, (build, options) in TEXTURE_SETS.items():
+    for name, (build, options) in TEXTURE_SETS.items():
+        if wanted("textures", name):
             bake_set(name, build, **options)
-    if ONLY in (None, "pickups"):
+    if wanted("pickups"):
         build_pickups()
 
 

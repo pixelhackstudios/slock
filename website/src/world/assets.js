@@ -6,6 +6,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 
 const BASE = `${import.meta.env.BASE_URL}world/`
 const TEXTURE_SETS = ['floor', 'cap', 'wall', 'cliff', 'ramp', 'pen']
+const GLOWING = ['wall', 'pen'] // sets with a glow map too: the walls' pipes, the pen's grate
 export const MODELS = ['clock', 'key', 'steel', 'clear_dots', 'close_traps', 'slug_pack', 'extra_slug', 'slug', 'gate',
   'chevron']
 
@@ -34,7 +35,7 @@ export class Assets {
   /** Everything the first section needs, calling `progress(0..1)` as it arrives. */
   async load(progress = () => {}) {
     let done = 0
-    const parts = TEXTURE_SETS.length * 3 + 1 + MODELS.length + 3
+    const parts = TEXTURE_SETS.length * 3 + GLOWING.length + MODELS.length + 3
     const tick = (x) => {
       progress(++done / parts)
       return x
@@ -51,7 +52,7 @@ export class Assets {
     const sets = Promise.all(TEXTURE_SETS.map(async (set) => {
       const [albedo, normal, orm, emission] = await Promise.all([texture(`${set}_albedo`, true),
         texture(`${set}_normal`, false), texture(`${set}_orm`, false),
-        set === 'pen' ? texture('pen_emission', true) : null])
+        GLOWING.includes(set) ? texture(`${set}_emission`, true) : null])
       return [set, { albedo, normal, orm, emission }]
     }))
     const [textures, layout, jelly, models, first] = await Promise.all([

@@ -1,7 +1,7 @@
 // The download buttons: the right file for this computer, from the newest release on GitHub (pre-releases too, so
 // the site never needs editing for a new version).
 const REPO = 'https://github.com/pixelhackstudios/slock'
-const FALLBACK_TAG = 'v0.9.0' // until GitHub answers, or if it can't be reached
+const FALLBACK_TAG = 'v0.10.0' // until GitHub answers, or if it can't be reached
 
 const PLATFORMS = {
   windows: { name: 'Windows', file: 'Slock-Windows.zip', match: 'Windows' },

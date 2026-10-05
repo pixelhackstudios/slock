@@ -354,10 +354,11 @@ func side_stop() -> Vector3:
 # ------------------------------------------------------------------ building
 #
 # The blocks are built from the maze kit (models/maze_kit.glb, made by art-work/models.py): a wall block is a cap
-# rounded over its top edges, a side piece on each face that shows and a rounded edge on each corner that shows (or a
-# plug where four wall blocks meet); a floor tile is one flat piece. Each tile's pieces are stretched onto its floor,
-# so they follow the ramps. Below the floors, the section's sheer sides (cliffs) are plain quads. The pieces' textures
-# are in textures/maze/.
+# rounded over its top edges, a side piece on each face that shows (or a stop, closing off the band set into its
+# sides, on each face against another block) and a rounded edge on each corner that shows (or a plug where four wall
+# blocks meet); a floor tile is one flat piece. Each tile's pieces are stretched onto its floor, so they follow the
+# ramps. Below the floors, the section's sheer sides (cliffs) are plain quads. The pieces' textures are in
+# textures/maze/.
 
 ## A tile's top at its corners (see _floor_corners): its floor, or a block higher for walls.
 func _top(col: int, row: int) -> PackedFloat32Array:
@@ -386,7 +387,8 @@ const STRIP := 8                  # the visible mesh is built in strips this man
 
 const KIT_SURFACES := {           # a strip's surfaces: [kit piece, texture set]
 	"cap": ["wall_cap", "cap"], "plug": ["wall_plug", "cap"], "side": ["wall_side", "wall"],
-	"edge": ["wall_edge", "wall"], "floor": ["floor", "floor"], "ramp": ["floor", "ramp"], "pen": ["floor", "pen"],
+	"stop": ["wall_stop", "wall"], "edge": ["wall_edge", "wall"], "floor": ["floor", "floor"],
+	"ramp": ["floor", "ramp"], "pen": ["floor", "pen"],
 }
 const FACES := [                  # the side piece's quarter turns: [neighbour, its corners and ours on the shared edge]
 	[Vector2i(0, -1), 3, 2, 0, 1],  # near (+z)
@@ -470,8 +472,11 @@ func _build_strip(i: int) -> void:
 			for k in 4:
 				var face: Array = FACES[k]
 				var n: Vector2i = Vector2i(col, row) + face[0]
-				if kind == WALL and _shows(n.x, n.y, face[1], face[2], t[face[3]], t[face[4]]):
-					kit.side.add(_kit.wall_side[k], place, sloped)
+				if kind == WALL:
+					if _shows(n.x, n.y, face[1], face[2], t[face[3]], t[face[4]]):
+						kit.side.add(_kit.wall_side[k], place, sloped)
+					else:
+						kit.stop.add(_kit.wall_stop[k], place, sloped)
 				if _shows(n.x, n.y, face[1], face[2], f[face[3]], f[face[4]]):
 					var a: Vector2 = xz[face[3]]
 					var b: Vector2 = xz[face[4]]
