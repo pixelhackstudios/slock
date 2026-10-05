@@ -13,8 +13,6 @@
   --body: 'Archivo Variable', system-ui, sans-serif;
   --mono: 'Martian Mono Variable', ui-monospace, monospace;
 
-  --rx: 0;  /* the board's tilt, as Tilt Warp's rotation axes (degrees), set from script */
-  --ry: 0;
   --gutter: clamp(16px, 5vw, 72px);
   color-scheme: dark;
 }
@@ -130,7 +128,6 @@ main, .bar, .foot { position: relative; z-index: 1; }
   line-height: 1;
   color: var(--red);
   text-decoration: none;
-  font-variation-settings: 'XROT' var(--rx), 'YROT' var(--ry);
 }
 
 .bar nav { display: flex; gap: 22px; margin-left: auto; }
@@ -179,7 +176,6 @@ main, .bar, .foot { position: relative; z-index: 1; }
   color: var(--red);
   letter-spacing: -0.01em;
   margin: 0.06em 0 0 -0.04em;
-  font-variation-settings: 'XROT' var(--rx), 'YROT' var(--ry);
   pointer-events: none;
 }
 
@@ -261,7 +257,6 @@ main, .bar, .foot { position: relative; z-index: 1; }
   line-height: 0.96;
   letter-spacing: -0.01em;
   margin-bottom: 0.45em;
-  font-variation-settings: 'XROT' var(--rx), 'YROT' var(--ry);
 }
 
 .aside { color: var(--grout); font-size: 0.95rem; }
@@ -354,8 +349,10 @@ main, .bar, .foot { position: relative; z-index: 1; }
   padding: 16vh var(--gutter) 14vh;
 }
 
-.download-inner { max-width: 60rem; }
-.download h2 { font-size: clamp(3.2rem, 9vw, 8.5rem); }
+.download-inner { max-width: 66rem; margin: 0 auto; }
+/* Two even columns, centred: getting the game on the left, its music on the right. */
+.download-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px clamp(32px, 6vw, 96px); align-items: center; }
+.download h2 { font-size: clamp(3.2rem, 7vw, 6.5rem); }
 .download .lede { max-width: 32ch; }
 .download .get-note { color: #59606b; }
 .btn--big { font-size: clamp(1.2rem, 1.6vw, 1.45rem); padding: 20px 30px 19px; border-radius: 18px; }
@@ -394,6 +391,130 @@ kbd {
 
 .gamepad { margin-top: 18px; color: #59606b; font-size: 0.95rem; }
 
+/* The soundtrack: a white block with the game's black outline, its progress a glowing pipe like the walls'. */
+.player {
+  width: 100%;
+  max-width: 27rem;
+  justify-self: end;
+  padding: 22px 22px 20px;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 0 0 2px #000, inset 0 -6px 0 #d8d5cc;
+}
+.player p { margin: 0; }
+.player-label, .player-times {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #59606b;
+}
+.player .player-title { margin-top: 10px; font-family: var(--display); font-size: 1.9rem; line-height: 1; color: var(--red); }
+.player-pipe {
+  position: relative;
+  margin-top: 20px;
+  height: 14px;
+  border-radius: 7px;
+  background: #3a3d44;
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.6), 0 0 0 1.5px #000;
+  cursor: pointer;
+  touch-action: none;
+}
+.player-pipe:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.player-glow {
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: 0;
+  max-width: calc(100% - 4px);
+  border-radius: 5px;
+  background: linear-gradient(#ff8a24, #fff35c 50%, #ff8a24);
+  box-shadow: 0 0 10px rgba(255, 170, 40, 0.75);
+}
+.player .player-times { display: flex; justify-content: space-between; margin-top: 8px; }
+.player-buttons { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; }
+.player-spacer { width: 46px; flex: none; }
+.player-buttons button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: #fff;
+  color: #000;
+  box-shadow: 0 0 0 2px #000, inset 0 -4px 0 #d8d5cc;
+  cursor: pointer;
+  transform-origin: 50% 100%;
+  transition: transform 0.35s cubic-bezier(0.34, 1.8, 0.5, 1);
+}
+.player-buttons button:hover { transform: scale(1.06, 0.95); }
+.player-buttons button:active { transform: scale(1.12, 0.86); transition-duration: 0.08s; }
+.player-buttons svg { width: 20px; height: 20px; fill: currentColor; }
+.player-buttons .player-play {
+  width: 62px;
+  height: 62px;
+  border-radius: 17px;
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 0 0 2px #000, inset 0 -5px 0 rgba(0, 0, 0, 0.18), inset 0 2px 0 rgba(255, 255, 255, 0.28);
+}
+.player-play svg { width: 26px; height: 26px; }
+.player-play .icon-pause, .player.playing .icon-play { display: none; }
+.player.playing .icon-pause { display: block; }
+.player-buttons .player-shuffle { width: 40px; height: 40px; border-radius: 11px; color: #9aa0a8; margin-right: 6px; }
+.player-buttons .player-shuffle[aria-pressed='true'] { color: var(--red); }
+.player-shuffle svg { width: 18px; height: 18px; }
+
+/* The playlist: a short scrolling list, the song playing in red with its own little glow. */
+.player-list {
+  position: relative;
+  max-height: 13.5rem;
+  margin: 18px -8px 0;
+  padding: 6px 4px 6px 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1.5px solid #e4e1d8;
+  scrollbar-width: thin;
+  scrollbar-color: #c9c5ba transparent;
+  overscroll-behavior: contain;
+  mask-image: linear-gradient(#000 82%, transparent);   /* fades out at the foot: there's more below */
+}
+.player-list button {
+  display: grid;
+  grid-template-columns: 2.2em 1fr auto;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  color: #000;
+  cursor: pointer;
+}
+.player-list button:hover { background: #f2f0ea; }
+.player-list button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.player-n, .player-len { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.04em; color: #8a909a; }
+.player-list .on { color: var(--red); font-weight: 650; }
+.player-list .on .player-n { color: transparent; position: relative; }
+.player-list .on .player-n::after {   /* a dot of the pipe's glow beside the song playing, pulsing while it plays */
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: radial-gradient(#fff35c, #ff8a24);
+  box-shadow: 0 0 6px rgba(255, 170, 40, 0.8);
+}
+.player.playing .player-list .on .player-n::after { animation: player-pulse 1.1s ease-in-out infinite; }
+@keyframes player-pulse { 50% { transform: scale(0.65); opacity: 0.7; } }
+
 /* ------------------------------------------------------------------ footer */
 
 .foot {
@@ -416,6 +537,8 @@ kbd {
 /* ------------------------------------------------------------------ small screens */
 
 @media (max-width: 860px) {
+  .download-top { grid-template-columns: 1fr; }
+  .player { justify-self: stretch; max-width: none; }
   .bar nav { display: none; }
   /* Shade at the top and bottom of the opening screen, where the words sit over the maze. */
   .hero { position: relative; isolation: isolate; }
@@ -437,5 +560,6 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .reveal { opacity: 1; transform: none; transition: none; }
-  .btn, .states li, .loader { transition: none; }
+  .btn, .states li, .loader, .player-buttons button { transition: none; }
+  .player.playing .player-list .on .player-n::after { animation: none; }
 }

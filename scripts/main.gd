@@ -179,6 +179,7 @@ func _start_run(play := true) -> void:
 ## The run starts: the clock goes and the board is yours.
 func _begin() -> void:
 	state = State.PLAYING
+	sounds.start_music()
 	rig.input_enabled = true
 	rig.reset_trackball()
 	_run_started = Time.get_ticks_msec()

@@ -5,6 +5,7 @@ import './styles.css'
 import Lenis from 'lenis'
 import { Director } from './director.js'
 import { setupDownloads } from './downloads.js'
+import { setupPlayer } from './player.js'
 import { LEVEL_TILT } from './world/slock.js'
 import { World } from './world/world.js'
 
@@ -12,6 +13,7 @@ const root = document.documentElement
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
 const touch = matchMedia('(pointer: coarse)').matches
 setupDownloads()
+setupPlayer()
 
 // ------------------------------------------------------------------ scrolling
 
@@ -22,8 +24,10 @@ for (const a of document.querySelectorAll('a[data-scroll]')) {
     const target = document.getElementById(id)
     if (!target) return
     e.preventDefault()
-    if (lenis) lenis.scrollTo(id === 'top' ? 0 : target, { duration: 1.6 })
-    else target.scrollIntoView()
+    // The soundtrack player sits in the middle of the screen; the chapters start at the top.
+    const middle = id === 'soundtrack' ? -Math.max(90, (innerHeight - target.offsetHeight) / 2) : 0
+    if (lenis) lenis.scrollTo(id === 'top' ? 0 : target, { duration: 1.6, offset: middle })
+    else target.scrollIntoView({ block: id === 'soundtrack' ? 'center' : 'start' })
   })
 }
 
@@ -99,7 +103,6 @@ async function start(world) {
   const download = document.getElementById('download')
   let shown = { state: null, since: 0 }
   let chapter = null
-  let tilt = ''
 
   let last = performance.now()
   requestAnimationFrame(function frame(t) {
@@ -132,15 +135,8 @@ async function start(world) {
     }
     world.render()
 
-    // The board's tilt, everywhere it shows: Tilt Warp's axes, the dial, and how Slock is moving.
+    // The board's tilt, on the dial, and how Slock is moving.
     const k = world.rig.tilt
-    const next = `${Math.round(-k.y * 40)},${Math.round(k.x * 40)}`
-    if (next !== tilt) {
-      tilt = next
-      const [rx, ry] = next.split(',')
-      root.style.setProperty('--rx', rx)
-      root.style.setProperty('--ry', ry)
-    }
     const hand = world.hand.clone()
     if (hand.length() > 1) hand.normalize()
     for (const dial of dials) {

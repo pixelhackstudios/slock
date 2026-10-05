@@ -27,7 +27,8 @@
       <nav aria-label="Sections">
         <a href="#play" data-scroll>How to play</a>
         <a href="#powerups" data-scroll>Powerups</a>
-        <a href="#watch" data-scroll>Watch</a>
+        <a href="#watch" data-scroll>Game Play</a>
+        <a href="#soundtrack" data-scroll>Sound Track</a>
       </nav>
       <a class="bar-get" href="#download" data-scroll>Download</a>
     </header>
@@ -129,6 +130,8 @@
 
       <section class="download" id="download">
         <div class="download-inner">
+          <div class="download-top">
+          <div class="download-get">
           <h2>Free. Go play.</h2>
           <p class="lede">No account, no installer. Download it, unzip it, play.</p>
           <div class="get get--big">
@@ -141,6 +144,33 @@
             <p class="get-note" data-version-long>The newest version, straight from GitHub.</p>
           </div>
           <p class="mac-note">On a Mac, the first time: right-click Slock.app and choose Open. It isn't signed by Apple yet, so a double-click won't open it.</p>
+          </div>
+          <aside class="player" id="soundtrack" aria-label="The soundtrack">
+            <p class="player-label">The soundtrack</p>
+            <p class="player-title" aria-live="polite">Main theme</p>
+            <div class="player-pipe" role="slider" tabindex="0" aria-label="Position in the song" aria-valuemin="0"
+              aria-valuenow="0" aria-valuemax="188"><div class="player-glow"></div></div>
+            <p class="player-times"><span>0:00</span><span>3:08</span></p>
+            <div class="player-buttons">
+              <button class="player-shuffle" type="button" aria-label="Shuffle" aria-pressed="true">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4l4 3.5-4 3.5V8.6h-1.6c-1.3 0-2.2.6-3 1.8l-3.6 5.4C6.6 17.6 5.3 18.4 3.3 18.4H2v-2.2h1.3c1.2 0 1.9-.4 2.6-1.5l3.6-5.4c1.2-1.8 2.8-2.9 4.9-2.9H16zM2 5.6h1.3c2 0 3.3.8 4.5 2.6l.6.9-1.3 2-.9-1.3c-.7-1.1-1.4-1.5-2.6-1.5H2zm9.9 9.2l1.3-2 .9 1.3c.7 1.1 1.6 1.5 2.6 1.5H16V13l4 3.5-4 3.5v-2.6h-1.6c-2 0-3.2-.8-4.4-2.6z" /></svg>
+              </button>
+              <button class="player-prev" type="button" aria-label="Previous song">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.5v14H6zM19 5v14L9 12z" /></svg>
+              </button>
+              <button class="player-play" type="button" aria-label="Play">
+                <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L19.5 12z" /></svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4.2v14H6zM13.8 5H18v14h-4.2z" /></svg>
+              </button>
+              <button class="player-next" type="button" aria-label="Next song">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 5H18v14h-2.5zM5 5v14l10-7z" /></svg>
+              </button>
+              <span class="player-spacer" aria-hidden="true"></span>
+            </div>
+            <ol class="player-list" aria-label="Songs" data-lenis-prevent></ol>
+            <audio preload="none"></audio>
+          </aside>
+          </div>
           <h3>Controls</h3>
           <dl class="controls">
             <div><dt><kbd>Mouse</kbd></dt><dd>Tilt the world</dd></div>

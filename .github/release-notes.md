@@ -6,7 +6,7 @@
 | **Linux** | `Slock-Linux.tar.gz` — extract it, run `Slock/Slock.x86_64` |
 
 ### What's new
-- **New walls.** The blue bolts and grid lines are gone: every wall block now has a band of tread plate set into its sides, with a glowing glass pipe running along it, all the way round the maze.
-- **The website** shows the new walls too.
+- **A new soundtrack.** Fourteen new songs. The title screen is quiet; once you start, the main theme fades in, then the rest play in a shuffled order.
+- **The website** has a soundtrack player with the full playlist, and its maze now plays itself calmly in the background while you read.
 
 Early pre-release: Windows and Mac builds haven't been tried on real machines yet. If something breaks, please [open an issue](https://github.com/pixelhackstudios/slock/issues).

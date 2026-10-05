@@ -1,7 +1,7 @@
 class_name Sounds
 extends Node
 ## Sound effects (not positional) and the music. The pellet pops, ouches and steel woo were made in Audacity; the
-## big pop and slug clicks by art-work/sounds.py. The songs are .ogg copies of WAV masters kept out of git. How loud
+## big pop and slug clicks by art-work/sounds.py. The songs are in sounds/theme-music/. How loud
 ## each plays is set here. Where there are several of a kind, it picks one at random, never the same one twice in
 ## a row.
 
@@ -13,7 +13,10 @@ const OUCH_VOLUME := 0.4          # Slock hit by a swurm (the clips are recorded
 const PICKUP_VOLUME := 0.5        # power pellets and powerups: steel woo, big pop
 const SLUG_VOLUME := 0.2          # slug pickups: the single slug and the three-slug pack
 const BIG_POP_DETUNE := 1.0       # semitones of random pitch wobble on the big pop
-const MUSIC_VOLUME := 0.7        # the theme, looping under everything
+const MUSIC_VOLUME := 0.7        # the music, under everything
+const MUSIC_DELAY := 3.0          # seconds after the first run starts before the music comes in ...
+const MUSIC_FADE := 4.0           # ... fading up over this long
+const MUSIC_DIR := "res://sounds/theme-music/"
 
 var _pellets: Array[AudioStream] = []
 var _ouches: Array[AudioStream] = []
@@ -25,9 +28,10 @@ var _voices: Array[AudioStreamPlayer] = []
 var _ouch_player: AudioStreamPlayer # its own player, so a burst of pops can't cut it off
 var _pickup_player: AudioStreamPlayer # likewise
 var _music: AudioStreamPlayer
-var _themes: Array[String] = []   # the theme-00x songs
+var _themes: Array[String] = []   # the theme-0xx songs
 var _queue: Array[String] = []    # ... still to play this time round
 var _last_song := ""
+var _music_started := false
 var _next_voice := 0
 var _last_pellet := -1
 var _last_ouch := -1
@@ -50,19 +54,30 @@ func _ready() -> void:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
 		_voices.append(p)
-	# Music plays from launch, through pauses and slug aiming too.
-	for file in ResourceLoader.list_directory("res://sounds"):
+	for file in ResourceLoader.list_directory(MUSIC_DIR):
 		if file.begins_with("theme-") and file.ends_with(".ogg"):
-			_themes.append("res://sounds/" + file)
+			_themes.append(MUSIC_DIR + file)
 	_music = AudioStreamPlayer.new()
-	_music.process_mode = Node.PROCESS_MODE_ALWAYS
+	_music.process_mode = Node.PROCESS_MODE_ALWAYS # it plays on through pauses and slug aiming
 	_music.finished.connect(_next_song)
 	add_child(_music)
-	_play(_music, load("res://sounds/game-theme.ogg"), MUSIC_VOLUME, 1.0)
 
 
-## The music: game-theme.ogg first, then the theme-00x songs in a shuffled order, reshuffled each time round
-## (never the same song twice in a row).
+## The music, once the first run starts (the title screen is quiet): after MUSIC_DELAY seconds main-theme.ogg fades
+## in, then the theme-0xx songs follow (see _next_song). Later runs leave it playing.
+func start_music() -> void:
+	if _music_started:
+		return
+	_music_started = true
+	await get_tree().create_timer(MUSIC_DELAY, true).timeout
+	_play(_music, load(MUSIC_DIR + "main-theme.ogg"), MUSIC_VOLUME, 1.0)
+	_music.volume_db = -60.0
+	create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).tween_property(_music, "volume_db",
+		linear_to_db(MUSIC_VOLUME), MUSIC_FADE).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+## After the main theme, the theme-0xx songs in a shuffled order, reshuffled each time round (never the same song
+## twice in a row).
 func _next_song() -> void:
 	if _themes.is_empty():
 		_play(_music, _music.stream, MUSIC_VOLUME, 1.0)

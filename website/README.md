@@ -28,7 +28,8 @@ Then open the address it prints (http://localhost:5173/slock/).
 | `src/director.js` | Where the camera looks for each part of the page |
 | `src/world/` | The game's world in three.js: the look (`look.js`, ported from the game's materials and shaders), the sections, Slock and how it moves (`slock.js`), the Swurms, and the autopilot that plays it |
 | `public/world/` | Exported from the game (don't edit by hand; see below) |
-| `public/media/` | The film of a run, recorded in the game |
+| `src/player.js` | The soundtrack player beside the downloads |
+| `public/media/` | The film of a run, recorded in the game, and the music (`music/`, from the game's `sounds/theme-music/`) |
 
 ## After changing the game
 
@@ -54,3 +55,12 @@ ffmpeg -ss 0.1 -i run.avi -vf "scale=1280:720:flags=lanczos,format=yuv420p" -c:v
 ```
 
 and pick a frame for `public/media/run.jpg` (the picture shown before it plays).
+
+When the game's music changes, make the site's copies again (from the repository root), and update the list of songs
+at the top of `src/player.js`:
+
+```
+for f in sounds/theme-music/*.ogg; do
+  ffmpeg -y -i "$f" -map_metadata -1 -c:a aac -b:a 96k -movflags +faststart "website/public/media/music/$(basename "$f" .ogg).m4a"
+done
+```
