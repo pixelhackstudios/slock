@@ -417,7 +417,8 @@ func _side_ramp(here: Section, p: Vector3) -> void:
 	var uphill := slock.linear_velocity.dot(up)
 	if uphill > 0.3:
 		if p.x * up.x >= here.side_top_x() * up.x:
-			slock.launch(here.side_landing(), here.tile)
+			if not slock.governed: # coming up the ramp, not settling back onto the tile at its top
+				slock.launch(here.side_landing(), here.tile)
 		else:
 			slock.boost = up * BOOST_ACCEL
 			slock.boost_limit = BOOST_SPEED

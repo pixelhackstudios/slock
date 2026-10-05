@@ -45,9 +45,10 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 
 ### Moving
 
-- Tilt gently to **creep**; tilt hard to **slide**. Level the board and Slock stops. The dial in the corner shows
-  your tilt: inside its small ring is level.
-- Slock runs along the corridors and turns into side openings when you tilt toward them — but come in too fast and you'll slide right past.
+- How far you tilt sets how fast Slock goes: tilt gently to **creep**, tilt hard to **slide**. Level the board and
+  Slock stops on a tile. The dial in the corner shows your tilt: inside its small ring is level.
+- Slock runs along the corridors and turns into side openings when you tilt toward them. Tilt a moment early and it
+  still makes the turn, barely slowing down.
 - **Holes and open edges are deadly.** Fall off and you lose a life: you start again at the gate you came in by,
   with the section just as you left it. You start with **3 lives**; lose the last one and the run is over.
 

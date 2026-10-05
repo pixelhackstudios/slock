@@ -1,11 +1,11 @@
 class_name LevelIndicator
 extends Control
 ## An artificial horizon for the board: the dot is where your hand is (trackball or stick), the outer ring is full
-## tilt, and the small centre ring is level. Inside it the board is within a quarter degree of flat, so Slock
+## tilt, and the small centre ring is level. Inside it the board is within half a degree of flat, so Slock
 ## stops; the dot turns green there.
 
 const RADIUS := 56.0
-const LEVEL_TILT := 0.01 # tilt (fraction of full) that counts as level: 0.25 degrees
+const LEVEL_TILT := Slock.LEVEL # tilt (fraction of full) that counts as level: half a degree
 
 var rig: TiltRig
 
