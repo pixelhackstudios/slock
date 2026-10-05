@@ -29,6 +29,7 @@ Slock is in early development. If it doesn't start or something breaks, please [
 
 You are **Slock**, a red jelly block. You don't move Slock — you **tilt the world** and Slock slides downhill.
 Eat every blue pellet in a section (or find its key) to open its gate, go through, and keep climbing before the clock runs out.
+You have three lives: falling off costs one.
 Make the top ten and your name goes on the leaderboard (it's kept on your computer).
 
 ### Controls

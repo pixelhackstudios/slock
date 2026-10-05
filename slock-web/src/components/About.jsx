@@ -138,8 +138,8 @@ export default function About() {
             </p>
             <p className="text-(--ink-dim) text-base leading-relaxed m-0">
               That's what makes it hard. Slock turns into side openings when you lean toward
-              them, but come in too fast and you'll slide right past. Holes and open edges end
-              the run. Go on, try a corridor.
+              them, but come in too fast and you'll slide right past. Holes and open edges cost
+              you a life. Go on, try a corridor.
             </p>
           </div>
           <Corridor />

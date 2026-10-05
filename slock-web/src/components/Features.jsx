@@ -16,7 +16,7 @@ const SECTIONS = [
     footer: 'Mouse or gamepad left stick. That\'s the whole control scheme.',
     groups: [
       { label: 'Moving', items: [['Creep or slide', 'Tilt the other way to slow down.'], ['Turn by leaning', 'Slock turns into openings you tilt toward.']] },
-      { label: 'Watch out', items: [['Holes and open edges', 'Fall off and the run is over.'], ['Too fast to turn', 'Overshoot and you slide right past.']] },
+      { label: 'Watch out', items: [['Holes and open edges', 'Fall off and it costs a life. You start with three.'], ['Too fast to turn', 'Overshoot and you slide right past.']] },
     ],
   },
   {
@@ -58,7 +58,7 @@ const SECTIONS = [
     footer: 'Three powerups per section. Take one and another turns up ten seconds later.',
     groups: [
       { label: 'Powerups', items: [['Slock of Steel', 'Smash inner walls and Swurms for 10 seconds.'], ['Close Traps', 'Every hole and gap in the walls sealed.']] },
-      { label: 'Also', items: [['Clear Dots', 'A quarter of the pellets vanish.'], ['Slug pickups', 'Three slugs, or one big one, for your store.']] },
+      { label: 'Also', items: [['Clear Dots', 'A quarter of the pellets vanish.'], ['Slug pickups', 'Three slugs, or one big one, for your store.'], ['Little red Slock', 'One more life. Hoard them.']] },
     ],
   },
 ];
