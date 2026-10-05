@@ -14,7 +14,7 @@ from mathutils import Vector, Quaternion, Euler
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "Builds" / "Trailer"
-TEX = ROOT / "textures"
+TEX = ROOT / "textures" / "maze"
 FONT_PATHS = ["/run/host/usr/share/fonts/truetype/noto/NotoSansDisplay-CondensedBlack.ttf",
               "/usr/share/fonts/truetype/noto/NotoSansDisplay-CondensedBlack.ttf"]
 
@@ -173,21 +173,24 @@ def principled(name):
     return m, m.node_tree.nodes["Principled BSDF"], m.node_tree
 
 def tile_material(name, stem):
+    """The game's maze texture set textures/maze/<stem>_*: colour, normal and ORM (occlusion, roughness, metallic)."""
     m, p, nt = principled(name)
-    base = nt.nodes.new("ShaderNodeTexImage"); base.image = bpy.data.images.load(str(TEX / f"{stem}_base.png"))
-    ao = nt.nodes.new("ShaderNodeTexImage"); ao.image = bpy.data.images.load(str(TEX / f"{stem}_ao.png"))
-    ao.image.colorspace_settings.name = "Non-Color"
+    base = nt.nodes.new("ShaderNodeTexImage"); base.image = bpy.data.images.load(str(TEX / f"{stem}_albedo.png"))
+    orm = nt.nodes.new("ShaderNodeTexImage"); orm.image = bpy.data.images.load(str(TEX / f"{stem}_orm.png"))
+    orm.image.colorspace_settings.name = "Non-Color"
     nrm = nt.nodes.new("ShaderNodeTexImage"); nrm.image = bpy.data.images.load(str(TEX / f"{stem}_normal.png"))
     nrm.image.colorspace_settings.name = "Non-Color"
+    split = nt.nodes.new("ShaderNodeSeparateColor")
     mul = nt.nodes.new("ShaderNodeMix"); mul.data_type = "RGBA"; mul.blend_type = "MULTIPLY"
     mul.inputs["Factor"].default_value = 1.0
     nmap = nt.nodes.new("ShaderNodeNormalMap"); nmap.inputs["Strength"].default_value = 0.8
+    nt.links.new(orm.outputs["Color"], split.inputs["Color"])
     nt.links.new(base.outputs["Color"], mul.inputs[6])
-    nt.links.new(ao.outputs["Color"], mul.inputs[7])
+    nt.links.new(split.outputs["Red"], mul.inputs[7])
     nt.links.new(mul.outputs[2], p.inputs["Base Color"])
+    nt.links.new(split.outputs["Green"], p.inputs["Roughness"])
     nt.links.new(nrm.outputs["Color"], nmap.inputs["Color"])
     nt.links.new(nmap.outputs["Normal"], p.inputs["Normal"])
-    p.inputs["Roughness"].default_value = 0.55
     return m
 
 def jelly(name, color, emit, transmission=0.8):
@@ -240,8 +243,8 @@ def hazard(name):
     return m
 
 M_FLOOR = tile_material("Floor", "floor")
-M_TOPS = tile_material("Tops", "tops")
-M_WALLS = tile_material("Walls", "walls")
+M_TOPS = tile_material("Tops", "cap")
+M_WALLS = tile_material("Walls", "wall")
 M_SLOCK = jelly("SlockJelly", (0.85, 0.0, 0.06), 0.35)
 M_CORE = jelly("SlockCore", (0.45, 0.0, 0.04), 0.6, transmission=0.0)
 M_WORM = jelly("SlormJelly", (0.2, 0.75, 0.12), 0.25, transmission=0.55)
