@@ -1,6 +1,6 @@
-# Builds the game for Windows, Mac and Linux and publishes a GitHub release with the three downloads, when a version
-# tag (like v0.8.0) is pushed, or when run by hand from the Actions tab for a tag that already exists. The release's
-# notes come from .github/release-notes.md.
+# Builds the game for Windows, Mac and Linux and publishes a GitHub release with the three downloads: when a version
+# tag (like v0.8.0) is pushed, or when run by hand from the Actions tab with the version to release, which then tags
+# the commit it builds. The release's notes come from .github/release-notes.md.
 name: Release
 
 on:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: The version tag to release (it must already exist), like v0.8.0
+        description: The version to release, like v0.8.0
         required: true
 
 permissions:
@@ -23,8 +23,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Godot and its export templates
         run: |
@@ -63,5 +61,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          gh release create "$TAG" Slock-Windows.zip Slock-Mac.zip Slock-Linux.tar.gz --verify-tag --prerelease \
+          gh release create "$TAG" Slock-Windows.zip Slock-Mac.zip Slock-Linux.tar.gz --target "$GITHUB_SHA" --prerelease \
             --title "Slock $TAG (early pre-release)" --notes-file .github/release-notes.md
