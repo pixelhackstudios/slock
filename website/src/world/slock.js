@@ -1,6 +1,7 @@
-// How Slock moves (slock.gd, and main.gd's ramps), for the page: tilted gravity pushes it along tile-centre rails,
-// floor friction is the only drag, it turns Pac-Man style at tile centres, walls stop it dead, and holes drop it.
-// The game uses a physics engine; this steps the same rules by hand.
+// How Slock moves (slock.gd, and main.gd's ramps), for the page: it runs along tile-centre rails and turns Pac-Man
+// style at tile centres. On a flat floor the tilt sets its speed, and levelled it stops on a tile; on ramps tilted
+// gravity pushes it, with floor friction the only drag. Walls stop it dead, and holes drop it. The game uses a
+// physics engine; this steps the same rules by hand.
 import * as THREE from 'three'
 import { FLOOR, LEVEL, VOID, WALL } from './section.js'
 
@@ -21,6 +22,20 @@ const BOOST_SPEED = 15
 const GUIDE_BRAKE = 20
 const LAUNCH_DURATION = 0.55
 const FALL_DISTANCE = 5
+// On a flat floor (slock.gd has the reasons)
+const TOP_SPEED = 28
+const ACCEL = 40
+const ACCEL_EASE = 5
+const BRAKE = 175
+const BRAKE_EASE = 10
+const COAST = 4
+export const LEVEL_TILT = 0.02 // tilt (fraction of full) under which the board counts as level
+export const STOP_BRAKE = 175
+const SETTLE_SPEED = 3
+const TURN_MEMORY = 0.3
+const TURN_LATE = 0.5
+const CORNER_CARRY = 0.9
+const KNOCK_TIME = 0.45
 
 export class SlockBody {
   /** `gravity()`: the current downhill direction (a unit vector, see TiltRig.gravityDir). */
@@ -34,6 +49,8 @@ export class SlockBody {
     this.vel = new THREE.Vector3()
     this.onFall = () => {}
     this._acc = 0
+    this._clock = 0
+    this._knockedUntil = 0
     this.reset()
   }
 
@@ -44,6 +61,8 @@ export class SlockBody {
     this.falling = false
     this.launch = null
     this.guide = null
+    this._turn = null // a lean to the side, remembered: [axis is z, sign] ...
+    this._turnUntil = 0 // ... until then
     this._place()
   }
 
@@ -83,13 +102,13 @@ export class SlockBody {
   _step(dt) {
     const s = this.section
     const g = this.gravity().multiplyScalar(FALL_GRAVITY * this.size)
+    this._clock += dt
     if (this.launch) return this._fly(dt)
     if (this.falling) {
       this.vel.y += g.y * dt
-      const [col, row] = this.tile
-      const centre = s.tileCentre(col, row)
-      this.vel.x = (centre.x - this.pos.x) * HOLE_SNAP
-      this.vel.z = (centre.z - this.pos.z) * HOLE_SNAP
+      const [col, row] = this.tile // (perhaps off the edge of the section: no floor heights there)
+      this.vel.x = ((col - s.centre) * s.tile - this.pos.x) * HOLE_SNAP
+      this.vel.z = (s.rowZ(row) - this.pos.z) * HOLE_SNAP
       this.pos.addScaledVector(this.vel, dt)
       if (this.pos.y < s.floor - FALL_DISTANCE) {
         this.onFall()
@@ -102,26 +121,56 @@ export class SlockBody {
     this._applyGuide()
     const p = this.pos
     const v = this.vel
+    const unit = g.length() / FALL_GRAVITY
+    const full = g.length() * Math.sin(MAX_TILT)
+    const tilt = THREE.MathUtils.clamp(Math.hypot(g.x, g.z) / Math.max(1e-4, full), 0, 1)
+    const [tc, tr] = this.tile
+    const f = s.floors[THREE.MathUtils.clamp(tc, 0, s.width - 1)][THREE.MathUtils.clamp(tr, 0, s.length - 1)]
+    this.governed = f.every((h) => Math.abs(h - f[0]) < 1e-6) && !this._boost && this._clock >= this._knockedUntil
 
-    // Rails: the centre stays on the tile-centre line across the corridor; it turns where the tilt favours the
-    // other axis and that way is open from the nearest tile centre.
+    // Rails: the centre stays on the tile-centre line across the corridor; it turns at a tile centre when the tilt
+    // favours the other axis (or did a moment ago) and that way is open.
     let wantZ = this.travelZ
     if (Math.abs(g.z) > Math.abs(g.x) * TURN_BIAS) wantZ = true
     else if (Math.abs(g.x) > Math.abs(g.z) * TURN_BIAS) wantZ = false
-    const along = this.travelZ ? p.z : p.x
-    const alongCentre = this.travelZ ? this._snapZ(along) : this._snap(along)
-    if (wantZ !== this.travelZ && !this.guide) {
-      const centre = this.travelZ ? new THREE.Vector3(p.x, p.y, alongCentre) : new THREE.Vector3(alongCentre, p.y, p.z)
-      const [col, row] = s.tileUnder(centre)
-      const next = wantZ ? [col, row - Math.sign(g.z)] : [col + Math.sign(g.x), row]
-      if (!this._solid(...next)) {
-        if (Math.abs(alongCentre - along) < 0.02 * this.size) {
-          this.travelZ = wantZ
-          p.copy(centre)
-          if (this.travelZ) v.x = 0
-          else v.z = 0
-        } else if (this.travelZ) v.z = (alongCentre - along) * TURN_SNAP
-        else v.x = (alongCentre - along) * TURN_SNAP
+    const leaning = wantZ !== this.travelZ && !this.guide
+    if (leaning) {
+      this._turn = [wantZ, Math.sign(wantZ ? g.z : g.x)]
+      this._turnUntil = this._clock + TURN_MEMORY
+    } else if (this._clock > this._turnUntil) this._turn = null
+
+    let pulling = false
+    if (this._turn && !this.guide) {
+      const along = this.travelZ ? p.z : p.x
+      const speed = this.travelZ ? v.z : v.x
+      const nearest = this.travelZ ? this._snapZ(along) : this._snap(along)
+      let at = null
+      if (Math.abs(speed) < SETTLE_SPEED * unit) {
+        if (this._opens(nearest)) {
+          if (Math.abs(nearest - along) < 0.02 * this.size) at = nearest
+          else {
+            if (this.travelZ) v.z = (nearest - along) * TURN_SNAP
+            else v.x = (nearest - along) * TURN_SNAP
+            pulling = true
+          }
+        }
+      } else {
+        const dir = Math.sign(speed)
+        const ahead = (nearest - along) * dir >= 0 ? nearest : nearest + dir * this.size
+        const behind = ahead - dir * this.size
+        if ((along - behind) * dir <= TURN_LATE * this.size && this._opens(behind)) at = behind
+        else if ((ahead - along) * dir <= Math.abs(speed) * dt && this._opens(ahead)) at = ahead
+      }
+      if (at !== null) {
+        const carry = this.governed ? Math.abs(speed) * CORNER_CARRY : 0
+        if (this.travelZ) p.z = at
+        else p.x = at
+        const [z, sign] = this._turn
+        this.travelZ = z
+        v.x = z ? 0 : sign * carry
+        v.z = z ? sign * carry : 0
+        this._turn = null
+        pulling = false
       }
     }
     if (this.travelZ) {
@@ -132,33 +181,41 @@ export class SlockBody {
       v.z = 0
     }
 
-    // Tilted gravity along the rail, on the floor's slope there; friction against the floor's push back.
     const axis = this.travelZ ? 'z' : 'x'
-    const eps = 0.05 * this.size
-    const ahead = p.clone()
-    const behind = p.clone()
-    ahead[axis] += eps
-    behind[axis] -= eps
-    const slope = (s.floorAt(ahead) - s.floorAt(behind)) / (2 * eps)
-    const push = (g[axis] + g.y * slope) / (1 + slope * slope)
-    const normal = Math.abs((slope * g[axis] - g.y) / Math.sqrt(1 + slope * slope))
     let speed = v[axis]
-    if (this._boost) {
-      if (Math.sign(speed) === Math.sign(this._boost) && Math.abs(speed) < BOOST_SPEED) speed += this._boost * dt
-      else if (speed === 0) speed += this._boost * dt
-      this._boost = 0
-    }
-    speed += push * dt
-    const grip = FRICTION * normal * dt
-    speed = Math.abs(speed) <= grip ? 0 : speed - Math.sign(speed) * grip
+    if (this.governed && !pulling) {
+      speed = this._govern(speed, g[axis] / Math.max(1e-4, full), tilt, leaning, unit, dt)
+      if (speed === 0) {
+        // At rest on a tile centre: exactly on it.
+        const nearest = this.travelZ ? this._snapZ(p.z) : this._snap(p.x)
+        if (Math.abs(nearest - p[axis]) < 0.002 * this.size) p[axis] = nearest
+      }
+    } else {
+      // Tilted gravity along the rail, on the floor's slope there; friction against the floor's push back.
+      const eps = 0.05 * this.size
+      const ahead = p.clone()
+      const behind = p.clone()
+      ahead[axis] += eps
+      behind[axis] -= eps
+      const slope = (s.floorAt(ahead) - s.floorAt(behind)) / (2 * eps)
+      const push = (g[axis] + g.y * slope) / (1 + slope * slope)
+      const normal = Math.abs((slope * g[axis] - g.y) / Math.sqrt(1 + slope * slope))
+      if (this._boost) {
+        if (Math.sign(speed) === Math.sign(this._boost) && Math.abs(speed) < BOOST_SPEED) speed += this._boost * dt
+        else if (speed === 0) speed += this._boost * dt
+      }
+      speed += push * dt
+      const grip = pulling ? 0 : FRICTION * normal * dt
+      speed = Math.abs(speed) <= grip ? 0 : speed - Math.sign(speed) * grip
 
-    // Creep: soft resistance at low speed. Level means stop: grip that eases off as the board tilts.
-    const sp = Math.abs(speed)
-    const fade = CREEP_FADE_SPEED * this.size
-    if (sp > 1e-4 && sp < fade) speed -= speed * Math.min(1, CREEP_DAMPING * (1 - sp / fade) * dt)
-    const tilt = THREE.MathUtils.clamp(Math.hypot(g.x, g.z) / Math.max(1e-4, g.length() * Math.sin(MAX_TILT)), 0, 1)
-    const slack = 1 - tilt
-    speed -= speed * Math.min(1, LEVEL_GRIP * slack * slack * dt)
+      // Creep: soft resistance at low speed. Level means stop: grip that eases off as the board tilts.
+      const sp = Math.abs(speed)
+      const fade = CREEP_FADE_SPEED * this.size
+      if (sp > 1e-4 && sp < fade) speed -= speed * Math.min(1, CREEP_DAMPING * (1 - sp / fade) * dt)
+      const slack = 1 - tilt
+      speed -= speed * Math.min(1, LEVEL_GRIP * slack * slack * dt)
+    }
+    this._boost = 0
     v[axis] = speed
 
     // Move, stopping dead against a wall.
@@ -182,6 +239,58 @@ export class SlockBody {
     p.y = this._floorY(p)
   }
 
+  // The speed along the rail for the next step on a flat floor (slock.gd, _govern).
+  _govern(speed, pull, tilt, leaning, unit, dt) {
+    if (tilt < LEVEL_TILT) return this._stopOnCentre(speed, unit, dt)
+    if (leaning) return Math.sign(speed) * Math.max(0, Math.abs(speed) - COAST * unit * dt)
+    const target = TOP_SPEED * unit * THREE.MathUtils.clamp(pull, -1, 1)
+    const faster = Math.abs(target) > Math.abs(speed) && target * speed >= 0
+    const most = (faster ? ACCEL : BRAKE) * unit
+    return speed + THREE.MathUtils.clamp((target - speed) * (faster ? ACCEL_EASE : BRAKE_EASE), -most, most) * dt
+  }
+
+  // Levelled: the speed that brings it to a stop on a tile centre (slock.gd, _stop_on_centre).
+  _stopOnCentre(speed, unit, dt) {
+    const s = this.section
+    const p = this.pos
+    const along = this.travelZ ? p.z : p.x
+    const nearest = this.travelZ ? this._snapZ(along) : this._snap(along)
+    if (Math.abs(speed) <= SETTLE_SPEED * unit) {
+      const off = nearest - along
+      const most = Math.min(SETTLE_SPEED * unit, Math.sqrt(2 * STOP_BRAKE * unit * Math.abs(off)))
+      return Math.sign(off) * Math.min(most, Math.abs(off) / dt)
+    }
+    const dir = Math.sign(speed)
+    let c = (nearest - along) * dir >= 0 ? nearest : nearest + dir * this.size
+    let stop = null
+    for (let k = 0; k < 8; k++) {
+      const at = this.travelZ ? new THREE.Vector3(p.x, p.y, c) : new THREE.Vector3(c, p.y, p.z)
+      const [col, row] = s.tileUnder(at)
+      // A hole, or a drop the game's floor ray doesn't reach (the top of a side ramp): stop before it.
+      if (s.tileAt(col, row) === VOID || s.floorAt(at) < p.y - this.height / 2 - 0.35 * this.size) break
+      stop = c
+      const d = Math.abs(c - along)
+      if (d > 1e-4 && (speed * speed) / (2 * d) <= STOP_BRAKE * unit) break
+      const next = this.travelZ ? [col, row - dir] : [col + dir, row]
+      if (this._solid(...next)) break // a wall straight after it
+      c += dir * this.size
+    }
+    if (stop === null) return dir * Math.max(0, Math.abs(speed) - 3 * STOP_BRAKE * unit * dt)
+    const d = Math.abs(stop - along)
+    if (d < 1e-4) return 0
+    return dir * Math.max(0, Math.abs(speed) - ((speed * speed) / (2 * d)) * dt)
+  }
+
+  // Whether the remembered turn's way is open from the tile centre at `along` on the current rail.
+  _opens(along) {
+    const s = this.section
+    const p = this.pos
+    const at = this.travelZ ? new THREE.Vector3(p.x, p.y, along) : new THREE.Vector3(along, p.y, p.z)
+    const [col, row] = s.tileUnder(at)
+    const [z, sign] = this._turn
+    return !this._solid(...(z ? [col, row - sign] : [col + sign, row]))
+  }
+
   // The side ramp (main.gd, _side_ramp): sliding down, it brakes to a stop just inside the side room; heading up,
   // a booster speeds it up and launches it in a hop onto the 4th tile of the maze.
   _ramps() {
@@ -199,7 +308,7 @@ export class SlockBody {
       const topX = s.tileCentre(topCol, row).x + up * s.tile * 0.5
       if (this.pos.x * up >= topX * up) {
         const doorway = risesRight ? last + 1 : first - 1
-        this._launchTo(s.tileCentre(doorway + 3 * up, row))
+        if (!this.governed) this._launchTo(s.tileCentre(doorway + 3 * up, row)) // up the ramp, not settling at its top
       } else this._boost = up * BOOST_ACCEL * this.size
     } else if (uphill < -0.3 && !this.guide) {
       const roomDoor = risesRight ? first - 1 : last + 1
@@ -256,6 +365,7 @@ export class SlockBody {
     // It stays on its rail: the knock goes along it if it has to.
     const axis = this.travelZ ? 'z' : 'x'
     this.vel[axis] = (Math.abs(away[axis]) > 0.2 ? Math.sign(away[axis]) : -Math.sign(this.vel[axis] || 1)) * speed
+    this._knockedUntil = this._clock + KNOCK_TIME // slides free for a moment, rather than at the tilt's speed
   }
 }
 

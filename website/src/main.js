@@ -5,6 +5,7 @@ import './styles.css'
 import Lenis from 'lenis'
 import { Director } from './director.js'
 import { setupDownloads } from './downloads.js'
+import { LEVEL_TILT } from './world/slock.js'
 import { World } from './world/world.js'
 
 const root = document.documentElement
@@ -168,7 +169,7 @@ async function start(world) {
       const dot = dial.lastElementChild
       dot.setAttribute('cx', (hand.x * 56).toFixed(1))
       dot.setAttribute('cy', (-hand.y * 56).toFixed(1))
-      dial.classList.toggle('level', k.length() < 0.01)
+      dial.classList.toggle('level', k.length() < LEVEL_TILT)
     }
     const speed = Math.hypot(world.body.vel.x, world.body.vel.z) / world.body.size
     const state = k.length() < 0.03 && speed < 0.3 ? 'stop' : speed > 4 ? 'slide' : 'creep'

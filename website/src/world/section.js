@@ -200,7 +200,7 @@ export class SectionView extends THREE.Group {
     if (!item) return null
     item.eaten = true
     if (this.slots.has(k)) {
-      const [sphere, ring, n] = this.slots.get(k)
+      const [sphere, ring, n] = (item.slot = this.slots.get(k))
       const gone = new THREE.Matrix4().makeScale(0, 0, 0)
       for (const batch of [sphere, ring]) {
         batch.setMatrixAt(n, gone)
@@ -212,6 +212,22 @@ export class SectionView extends THREE.Group {
       this.pickups.delete(k)
     }
     return item.kind
+  }
+
+  /** Put the eaten pellets back. */
+  refill() {
+    const m = new THREE.Matrix4()
+    for (const item of this.items) {
+      if (!item.eaten || !item.slot) continue
+      const [sphere, ring, n] = item.slot
+      m.makeTranslation(...item.at)
+      for (const batch of [sphere, ring]) {
+        batch.setMatrixAt(n, m)
+        batch.instanceMatrix.needsUpdate = true
+      }
+      this.slots.set(this.key(...item.tile), item.slot)
+      item.eaten = false
+    }
   }
 
   /** Pickups spin and bob; swurms crawl. */
