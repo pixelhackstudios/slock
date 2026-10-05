@@ -9,8 +9,8 @@ You may share and adapt them for any purpose, including commercially, as long as
 ## What counts as art
 
 - Everything in `art-work/`
-- The tile textures in `textures/`, the model in `models/` and the sounds in `sounds/` (`.png`, `.fbx`, `.wav` and
-  `.ogg` files, music included)
+- The textures in `textures/`, the models in `models/` and the sounds in `sounds/` (`.png`, `.glb`, `.fbx`, `.wav`
+  and `.ogg` files, music included)
 
 All other files are source code, covered by the MIT licence in `LICENSE`.
 

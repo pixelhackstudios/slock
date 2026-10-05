@@ -602,11 +602,13 @@ func _setup_lighting() -> void:
 	env.background_color = Color.BLACK
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.36, 0.36, 0.36) # neutral grey fill
-	# Reflections: a plain neutral grey all round (the background stays black), so polished things like Slock of
-	# Steel have something to reflect without tinting the tiles.
+	# Reflections: a neutral grey sky, lighter overhead and darker below (the background stays black), so polished
+	# things like Slock of Steel and the pickups' chrome have something to reflect without tinting the tiles.
 	var grey := ProceduralSkyMaterial.new()
-	for prop in ["sky_top_color", "sky_horizon_color", "ground_bottom_color", "ground_horizon_color"]:
-		grey.set(prop, Color(0.3, 0.3, 0.3))
+	grey.sky_top_color = Color(0.6, 0.6, 0.6)
+	grey.sky_horizon_color = Color(0.34, 0.34, 0.34)
+	grey.ground_horizon_color = Color(0.26, 0.26, 0.26)
+	grey.ground_bottom_color = Color(0.1, 0.1, 0.1)
 	grey.sun_angle_max = 0.0
 	env.sky = Sky.new()
 	env.sky.sky_material = grey

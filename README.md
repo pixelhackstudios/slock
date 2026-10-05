@@ -111,9 +111,9 @@ included; Godot offers to download its export templates the first time). Put bui
 
 | | |
 |---|---|
-| `scripts/` | The game, in GDScript: `main.gd` runs a run, `section.gd` builds each section from the layout `maze_gen.gd` generates, `slock.gd` is the block you tilt |
-| `textures/`, `models/`, `sounds/` | The art the game uses |
-| `art-work/` | Source art, and the scripts that turn it into the above (`process_tiles.py`, `sounds.py`) |
+| `scripts/` | The game, in GDScript: `main.gd` runs a run, `section.gd` builds each section from the layout `maze_gen.gd` generates (out of the maze kit's pieces), `slock.gd` is the block you tilt |
+| `textures/`, `models/`, `sounds/` | The art the game uses: the maze kit and the pickups are in `models/`, the maze's textures in `textures/maze/` |
+| `art-work/` | Source art, and the scripts that turn it into the above: `models.py` builds every model and the maze's textures in [Blender](https://www.blender.org) (`blender -b --python art-work/models.py`), `sounds.py` makes sound effects. The top of each says how to run it |
 | `slock-web/` | The website |
 
 ## Contributing

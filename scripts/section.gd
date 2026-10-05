@@ -28,7 +28,6 @@ const DEPTH := 1.0                # how far blocks reach below the lowest floor 
 enum { VOID, FLOOR, WALL }
 enum Level { MAIN, LOW, CLIMB, SIDE } # the maze, the side room, the climb ramp, the side ramp
 enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY, STEEL, CLEAR_DOTS, CLOSE_TRAPS, SLUG_PACK, EXTRA_SLUG }
-enum { SURF_FLOOR, SURF_WALL_SIDE, SURF_WALL_TOP }
 
 var index := 0
 var layout: Array[String]         # see the characters above
@@ -353,6 +352,12 @@ func side_stop() -> Vector3:
 
 
 # ------------------------------------------------------------------ building
+#
+# The blocks are built from the maze kit (models/maze_kit.glb, made by art-work/models.py): a wall block is a cap
+# rounded over its top edges, a side piece on each face that shows and a rounded edge on each corner that shows (or a
+# plug where four wall blocks meet); a floor tile is one flat piece. Each tile's pieces are stretched onto its floor,
+# so they follow the ramps. Below the floors, the section's sheer sides (cliffs) are plain quads. The pieces' textures
+# are in textures/maze/.
 
 ## A tile's top at its corners (see _floor_corners): its floor, or a block higher for walls.
 func _top(col: int, row: int) -> PackedFloat32Array:
@@ -363,6 +368,14 @@ func _top(col: int, row: int) -> PackedFloat32Array:
 	return f
 
 
+## A tile's top (see _top): from the strip being built, if it's there.
+func _top_of(col: int, row: int) -> PackedFloat32Array:
+	var k := col - _tops_from
+	if k >= 0 and k < _tops.size():
+		return _tops[k][row]
+	return _top(col, row)
+
+
 ## The bottom of the section's blocks: DEPTH below its lowest floor.
 func _bottom() -> float:
 	return minf(_prev_floor, floor_y) - (SIDE_DROP if has_side_ramp() else 0.0) - DEPTH
@@ -371,13 +384,36 @@ func _bottom() -> float:
 const STRIP := 8                  # the visible mesh is built in strips this many columns wide, so a change to
                                   # one tile (a wall blasted, the exit sealed) only rebuilds its strip
 
+const KIT_SURFACES := {           # a strip's surfaces: [kit piece, texture set]
+	"cap": ["wall_cap", "cap"], "plug": ["wall_plug", "cap"], "side": ["wall_side", "wall"],
+	"edge": ["wall_edge", "wall"], "floor": ["floor", "floor"], "ramp": ["floor", "ramp"], "pen": ["floor", "pen"],
+}
+const FACES := [                  # the side piece's quarter turns: [neighbour, its corners and ours on the shared edge]
+	[Vector2i(0, -1), 3, 2, 0, 1],  # near (+z)
+	[Vector2i(1, 0), 0, 3, 1, 2],   # right (+x)
+	[Vector2i(0, 1), 1, 0, 2, 3],   # far (-z)
+	[Vector2i(-1, 0), 2, 1, 3, 0],  # left (-x)
+]
+const FACE_NORMALS: Array[Vector3] = [Vector3.BACK, Vector3.RIGHT, Vector3.FORWARD, Vector3.LEFT]
+const CORNERS := [                # the edge piece's quarter turns: [x side, row side (-1 near), our corner]
+	[1, -1, 1],  # near-right
+	[1, 1, 2],   # far-right
+	[-1, 1, 3],  # far-left
+	[-1, -1, 0], # near-left
+]
+
+static var _kit := {}             # kit piece -> its four quarter turns about y: [positions, normals, tangents, uvs]
+static var _kit_triangles := {}   # kit piece -> its triangles, repeated for as many copies as a strip has needed
+static var _looks := {}           # texture set -> material
+
 var _strips: Array[MeshInstance3D] = []
-var _materials: Array[StandardMaterial3D] = []
-var _faces := [0, 0, 0]           # quads added to each surface of the strip being built
+var _cliff_quads := 0             # quads in the cliff surface of the strip being built
+var _tops: Array = []             # ... and its tiles' tops (see _top), from column _tops_from: _tops[col][row]
+var _tops_from := 0
 
 
 func _build_mesh() -> void:
-	_materials = [_material("floor"), _material("walls"), _material("tops")]
+	_load_kit()
 	_strips.resize(ceili(width / float(STRIP)))
 	for i in _strips.size():
 		await _pause()
@@ -386,50 +422,80 @@ func _build_mesh() -> void:
 
 ## (Re)build the visible mesh of strip `i`.
 func _build_strip(i: int) -> void:
-	var tools := []
-	for k in 3:
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		tools.append(st)
-
+	var kit := {} # KIT_SURFACES key -> KitSurface
+	for key in KIT_SURFACES:
+		kit[key] = KitSurface.new()
+	var cliff := SurfaceTool.new()
+	cliff.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_cliff_quads = 0
 	var h := tile * 0.5
 	var bot := _bottom()
-	var side: SurfaceTool = tools[SURF_WALL_SIDE]
-	for col in range(i * STRIP, mini(width, (i + 1) * STRIP)):
+	var c0 := i * STRIP
+	var c1 := mini(width, (i + 1) * STRIP)
+	# Every tile's top, for the strip and the columns either side (a tile's pieces depend on its neighbours).
+	_tops_from = maxi(0, c0 - 1)
+	_tops.clear()
+	for col in range(_tops_from, mini(width, c1 + 1)):
+		var column := []
+		column.resize(length)
+		for row in length:
+			column[row] = _top(col, row)
+		_tops.append(column)
+	for col in range(c0, c1):
 		for row in length:
 			var kind: int = tiles[col][row]
 			if kind == VOID:
 				continue
-			var c := tile_centre(Vector2i(col, row))
-			var t := _top(col, row) # near-left, near-right, far-right, far-left
-			var x0 := c.x - h
-			var x1 := c.x + h
-			var z0 := c.z - h # far
-			var z1 := c.z + h # near
-			var nl := Vector3(x0, t[0], z1)
-			var nr := Vector3(x1, t[1], z1)
-			var fr := Vector3(x1, t[2], z0)
-			var fl := Vector3(x0, t[3], z0)
-			var up := (nr - fl).cross(nl - fr).normalized()
-			var lid := SURF_WALL_TOP if kind == WALL else SURF_FLOOR
-			_quad(tools[lid], fl, fr, nr, nl, up if up.y > 0 else -up, lid)
-			# A side face shows unless the neighbour is solid and at least as tall along the shared edge.
-			var s := SURF_WALL_SIDE
-			if _shows(col + 1, row, 3, 0, t[2], t[1]):
-				_quad(side, Vector3(x1, bot, z0), fr, nr, Vector3(x1, bot, z1), Vector3.RIGHT, s)
-			if _shows(col - 1, row, 2, 1, t[3], t[0]):
-				_quad(side, Vector3(x0, bot, z0), fl, nl, Vector3(x0, bot, z1), Vector3.LEFT, s)
-			if _shows(col, row + 1, 0, 1, t[3], t[2]): # row + 1 is further along -Z
-				_quad(side, Vector3(x0, bot, z0), fl, fr, Vector3(x1, bot, z0), Vector3.FORWARD, s)
-			if _shows(col, row - 1, 3, 2, t[0], t[1]):
-				_quad(side, Vector3(x0, bot, z1), nl, nr, Vector3(x1, bot, z1), Vector3.BACK, s)
+			var t: PackedFloat32Array = _tops[col - _tops_from][row]
+			var f := _floor_corners(col, row) if kind == WALL else t # near-left, near-right, far-right, far-left
+			var place := _placement(col, row, f)
+			var sloped := not (is_equal_approx(f[0], f[1]) and is_equal_approx(f[1], f[2]) and is_equal_approx(f[2], f[3]))
+			if kind == WALL:
+				kit.cap.add(_kit.wall_cap[0], place, sloped)
+				for k in 4:
+					var c: Array = CORNERS[k]
+					if _corner_enclosed(col, row, c[0], c[1], t[c[2]]):
+						kit.plug.add(_kit.wall_plug[k], place, sloped)
+					else:
+						kit.edge.add(_kit.wall_edge[k], place, sloped)
+			else:
+				kit[_floor_surface(col, row)].add(_kit.floor[0], place, sloped)
+			# Sides: a wall's side piece shows unless the neighbour is solid and at least as tall along the shared
+			# edge; below it (or below a floor), a cliff runs down to the bottom where the neighbour is lower.
+			var x := (col - centre) * tile
+			var z := row_z(row)
+			var xz: Array[Vector2] = [Vector2(x - h, z + h), Vector2(x + h, z + h), Vector2(x + h, z - h),
+				Vector2(x - h, z - h)]
+			var ref := floor_y - (SIDE_DROP if levels[col][row] == Level.LOW else 0.0)
+			for k in 4:
+				var face: Array = FACES[k]
+				var n: Vector2i = Vector2i(col, row) + face[0]
+				if kind == WALL and _shows(n.x, n.y, face[1], face[2], t[face[3]], t[face[4]]):
+					kit.side.add(_kit.wall_side[k], place, sloped)
+				if _shows(n.x, n.y, face[1], face[2], f[face[3]], f[face[4]]):
+					var a: Vector2 = xz[face[3]]
+					var b: Vector2 = xz[face[4]]
+					_quad(cliff, Vector3(a.x, bot, a.y), Vector3(a.x, f[face[3]], a.y), Vector3(b.x, f[face[4]], b.y),
+						Vector3(b.x, bot, b.y), FACE_NORMALS[k], ref)
+	_tops.clear()
 
 	var mesh := ArrayMesh.new()
-	for k in 3:
-		if _faces[k] > 0: # an empty surface can't be committed
-			tools[k].commit(mesh)
-			mesh.surface_set_material(mesh.get_surface_count() - 1, _materials[k])
-		_faces[k] = 0
+	for key in kit:
+		var s: KitSurface = kit[key]
+		if s.copies == 0:
+			continue # an empty surface can't be committed
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = s.positions
+		arrays[Mesh.ARRAY_NORMAL] = s.normals
+		arrays[Mesh.ARRAY_TANGENT] = s.tangents
+		arrays[Mesh.ARRAY_TEX_UV] = s.uvs
+		arrays[Mesh.ARRAY_INDEX] = _triangles(KIT_SURFACES[key][0], s.copies)
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		mesh.surface_set_material(mesh.get_surface_count() - 1, _look(KIT_SURFACES[key][1]))
+	if _cliff_quads > 0:
+		cliff.commit(mesh)
+		mesh.surface_set_material(mesh.get_surface_count() - 1, _look("cliff"))
 	if _strips[i] != null:
 		_strips[i].queue_free()
 	var mi := MeshInstance3D.new()
@@ -438,55 +504,157 @@ func _build_strip(i: int) -> void:
 	_strips[i] = mi
 
 
+## Which floor a tile gets: the booster ramps' tread plate, the swurm pen's grate, or plain floor.
+func _floor_surface(col: int, row: int) -> String:
+	if levels[col][row] == Level.SIDE or (levels[col][row] == Level.CLIMB and index > 0):
+		return "ramp"
+	return "pen" if _char(col, row) == "S" else "floor"
+
+
+## Where kit pieces go on tile (col, row), whose floor is at `f` (see _floor_corners): from a piece's own unit block
+## (x and z -0.5..0.5, standing on y = 0) to the world, stretched onto the tile's floor, which may slope.
+func _placement(col: int, row: int, f: PackedFloat32Array) -> Transform3D:
+	var rise_x := (f[1] + f[2] - f[0] - f[3]) * 0.5   # left to right
+	var rise_z := (f[0] + f[1] - f[2] - f[3]) * 0.5   # far to near
+	var at := Vector3((col - centre) * tile, (f[0] + f[1] + f[2] + f[3]) * 0.25, row_z(row))
+	return Transform3D(Basis(Vector3(tile, rise_x, 0), Vector3(0, tile, 0), Vector3(0, rise_z, tile)), at)
+
+
+## Whether a wall's corner is closed in: the two blocks beside it and the one across it are all walls at least as tall
+## there (`height`), so its rounded edge would be hidden (a plug closes the dimple the four rounded corners leave).
+## `sx`: +1 the right corner; `sr`: -1 the near corner.
+func _corner_enclosed(col: int, row: int, sx: int, sr: int, height: float) -> bool:
+	for n in [[col + sx, row, -sx, sr], [col, row + sr, sx, -sr], [col + sx, row + sr, -sx, -sr]]:
+		if tile_at(n[0], n[1]) != WALL or _top_of(n[0], n[1])[_corner_index(n[2], n[3])] < height - 1e-4:
+			return false
+	return true
+
+
+static func _corner_index(sx: int, sr: int) -> int:
+	if sr < 0:
+		return 0 if sx < 0 else 1
+	return 3 if sx < 0 else 2
+
+
 ## Whether the side face towards neighbour (col, row) shows: unless the neighbour is solid and its top, at the
 ## two corners on the shared edge (`ca`, `cb`), is at least as high as ours there (`ya`, `yb`).
 func _shows(col: int, row: int, ca: int, cb: int, ya: float, yb: float) -> bool:
 	if tile_at(col, row) == VOID:
 		return true
-	var n := _top(col, row)
+	var n := _top_of(col, row)
 	return n[ca] < ya - 1e-4 or n[cb] < yb - 1e-4
 
 
-## One flat quad facing `normal`. UVs put one whole texture on each block face. Tangents (for the tile normal
-## maps) are set here, the way Godot's generate_tangents() would, but without its cost on the whole mesh.
-func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3, surface := -1) -> void:
-	if surface >= 0:
-		_faces[surface] += 1
+## One flat cliff quad facing `normal`. UVs put one whole texture on each block's worth of it, lined up with the
+## floor at height `ref`. Tangents (for the normal map) are set here, the way Godot's generate_tangents() would, but
+## without its cost on the whole mesh.
+func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, normal: Vector3, ref: float) -> void:
+	_cliff_quads += 1
 	# Godot draws clockwise triangles (seen from the front) as front faces.
 	if (b - a).cross(c - a).dot(normal) > 0:
 		var t := b
 		b = d
 		d = t
-	# The texture's u runs along x (along z on faces looking along x), its v along z on tops and down the sides.
+	# The texture's u runs along x (along z on faces looking along x), its v down the sides.
 	var u := Vector3.BACK if absf(normal.x) > 0.5 else Vector3.RIGHT
-	u = (u - normal * normal.dot(u)).normalized()
-	var v := Vector3.BACK if absf(normal.y) > 0.5 else Vector3.DOWN
-	var tangent := Plane(u, 1.0 if u.cross(normal).dot(v) >= 0.0 else -1.0)
+	var tangent := Plane(u, 1.0 if u.cross(normal).dot(Vector3.DOWN) >= 0.0 else -1.0)
 	for p in [a, b, c, a, c, d]:
 		st.set_normal(normal)
 		st.set_tangent(tangent)
-		st.set_uv(_uv(p, normal))
+		st.set_uv(Vector2((p.z if absf(normal.x) > 0.5 else p.x) / tile + 0.5, (ref - p.y) / tile))
 		st.add_vertex(p)
 
 
-func _uv(p: Vector3, normal: Vector3) -> Vector2:
-	if absf(normal.y) > 0.5:
-		return Vector2(p.x / tile + 0.5, p.z / tile + 0.5)
-	if absf(normal.x) > 0.5:
-		return Vector2(p.z / tile + 0.5, -p.y / tile)
-	return Vector2(p.x / tile + 0.5, -p.y / tile)
-
-
-func _material(set_name: String) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_texture = load("res://textures/%s_base.png" % set_name)
+## The material for one of the kit's texture sets (textures/maze/<set>_*.png).
+static func _look(set_name: String) -> ORMMaterial3D:
+	if _looks.has(set_name):
+		return _looks[set_name]
+	var m := ORMMaterial3D.new()
+	var path := "res://textures/maze/%s_%s.png"
+	m.albedo_texture = load(path % [set_name, "albedo"])
 	m.normal_enabled = true
-	m.normal_texture = load("res://textures/%s_normal.png" % set_name)
+	m.normal_texture = load(path % [set_name, "normal"])
+	m.orm_texture = load(path % [set_name, "orm"])
 	m.ao_enabled = true
-	m.ao_texture = load("res://textures/%s_ao.png" % set_name)
-	m.roughness = 0.6
+	if ResourceLoader.exists(path % [set_name, "emission"]):
+		m.emission_enabled = true
+		m.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY # the texture is the glow
+		m.emission = Color.WHITE
+		m.emission_texture = load(path % [set_name, "emission"])
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_looks[set_name] = m
 	return m
+
+
+## Load the maze kit's pieces (once), each in its four quarter turns about y: as modelled (facing +z, or at the near
+## right corner), then turned a quarter at a time (so the next faces +x, then -z, then -x).
+static func _load_kit() -> void:
+	if not _kit.is_empty():
+		return
+	var scene: Node = load("res://models/maze_kit.glb").instantiate()
+	for mi: MeshInstance3D in scene.find_children("*", "MeshInstance3D", true, false):
+		var arrays := mi.mesh.surface_get_arrays(0)
+		var turns := []
+		for k in 4:
+			var turn := Transform3D(Basis(Vector3.UP, k * PI * 0.5), Vector3.ZERO)
+			var tangents: PackedFloat32Array = arrays[Mesh.ARRAY_TANGENT].duplicate()
+			for v in range(0, tangents.size(), 4):
+				var tn := turn.basis * Vector3(tangents[v], tangents[v + 1], tangents[v + 2])
+				tangents[v] = tn.x
+				tangents[v + 1] = tn.y
+				tangents[v + 2] = tn.z
+			turns.append([turn * (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array),
+				turn * (arrays[Mesh.ARRAY_NORMAL] as PackedVector3Array), tangents, arrays[Mesh.ARRAY_TEX_UV]])
+		_kit[String(mi.name)] = turns
+		_kit_triangles[String(mi.name)] = [arrays[Mesh.ARRAY_INDEX], arrays[Mesh.ARRAY_INDEX].duplicate()]
+	scene.free()
+
+
+## The triangles of `copies` copies of a kit piece, each copy's vertices straight after the last's.
+static func _triangles(piece: String, copies: int) -> PackedInt32Array:
+	var tri: Array = _kit_triangles[piece] # [one copy's, as many copies' as needed so far]
+	var one: PackedInt32Array = tri[0]
+	var many: PackedInt32Array = tri[1]
+	var have := many.size() / one.size()
+	if have < copies:
+		var verts: int = (_kit[piece][0][0] as PackedVector3Array).size()
+		var more := PackedInt32Array()
+		more.resize((maxi(copies, have * 2) - have) * one.size())
+		var k := 0
+		for c in range(have, have + more.size() / one.size()):
+			for i in one:
+				more[k] = i + c * verts
+				k += 1
+		many.append_array(more)
+		tri[1] = many
+	return many.slice(0, copies * one.size())
+
+
+## One of a strip's kit surfaces while it's built: the pieces added so far, placed in the world.
+class KitSurface:
+	var copies := 0
+	var positions := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var tangents := PackedFloat32Array()
+	var uvs := PackedVector2Array()
+
+	## Add a piece (one of its turns, see _load_kit) placed by `place` (see _placement).
+	func add(turn: Array, place: Transform3D, sloped: bool) -> void:
+		copies += 1
+		positions.append_array(place * (turn[0] as PackedVector3Array))
+		uvs.append_array(turn[3])
+		if not sloped:
+			normals.append_array(turn[1])
+			tangents.append_array(turn[2])
+			return
+		# Stretched up a slope: normals tilt by the inverse transpose, tangents follow the surface.
+		var nb := place.basis.inverse().transposed()
+		var tn: PackedFloat32Array = turn[2]
+		for n: Vector3 in turn[1]:
+			normals.append((nb * n).normalized())
+		for k in range(0, tn.size(), 4):
+			var t := (place.basis * Vector3(tn[k], tn[k + 1], tn[k + 2])).normalized()
+			tangents.append_array(PackedFloat32Array([t.x, t.y, t.z, tn[k + 3]]))
 
 
 # ------------------------------------------------------------------ collision
@@ -637,32 +805,19 @@ func _slab(body: StaticBody3D, col0: int, col1: int, row0: int, row1: int) -> Co
 	return cs
 
 
-## A booster's markings: orange chevrons pointing uphill from `bottom` to `top` (points on the ramp's centre line).
+## A booster's markings: glowing chevrons (models/chevron.glb) pointing uphill from `bottom` to `top` (points on the
+## ramp's centre line).
 func _add_chevrons(bottom: Vector3, top: Vector3) -> void:
-	var glow := StandardMaterial3D.new()
-	glow.albedo_color = Color(1.0, 0.6, 0.1)
-	glow.emission_enabled = true
-	glow.emission = Color(2.0, 0.9, 0.1)
-	glow.roughness = 0.5
-	var bar := BoxMesh.new()
-	bar.size = Vector3(0.45, 0.04, 0.12) * tile # long across the ramp; the chevron's arms
-	bar.material = glow
 	var run := Vector3(top.x - bottom.x, 0, top.z - bottom.z)
 	var uphill := run.normalized()
-	var across := Vector3(-uphill.z, 0, uphill.x)
-	var heading := atan2(-uphill.x, -uphill.z) # turns the bar's frame so its "uphill" is -Z, like the climb ramp
+	var heading := atan2(-uphill.x, -uphill.z) # turns the chevron (modelled pointing -Z, like the climb ramp) uphill
 	var slope := atan2(top.y - bottom.y, run.length())
 	var count := maxi(2, roundi(run.length() / (tile * 1.5)))
 	for i in count:
-		var f := (i + 0.5) / count
-		var at := bottom.lerp(top, f) + Vector3.UP * 0.06 * tile
-		for side in [-1, 1]:
-			var piece := MeshInstance3D.new()
-			piece.mesh = bar
-			piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			piece.basis = Basis(Vector3.UP, heading) * Basis(Vector3.RIGHT, slope) * Basis(Vector3.UP, deg_to_rad(-35.0 * side))
-			piece.position = at + across * side * tile * 0.17
-			add_child(piece)
+		var chevron := Section.model("chevron", false)
+		chevron.basis = Basis(Vector3.UP, heading) * Basis(Vector3.RIGHT, slope) * Basis.from_scale(Vector3.ONE * tile)
+		chevron.position = bottom.lerp(top, (i + 0.5) / count) + Vector3.UP * 0.004 * tile
+		add_child(chevron)
 
 
 ## Wall up the exit behind Slock, once it's through: no going back.
@@ -777,14 +932,14 @@ const POWER_RADIUS := 0.23        # power pellets: big glowing orbs (0.46 blocks
 const PICKUP_HEIGHT := 0.6        # power pellets, clocks and keys float higher ...
 const PICKUP_BOB := 0.12          # ... and bob more
 const OUTLINE_PX := 0.5           # black outline width round the orbs, in screen pixels
-const PICKUP_OUTLINE_PX := 1.5    # ... and round the clocks, keys and powerups
+const PICKUP_OUTLINE_PX := 1.5    # ... and round the models: the clocks, keys and powerups, and the gate
 
 var _pellets_left := 0            # blue pellets still uneaten: the gate opens at none (gold and power pellets
                                   # only add time)
 var _heights := {}                # Vector2i(col, row) -> world height of what floats there
 var _slots := {}                  # orbs: Vector2i(col, row) -> [sphere batch, ring batch, instance index]
 var _orb_batches: Array[Node] = []
-var _pickups := {}                # clocks and keys: Vector2i(col, row) -> their node ...
+var _pickups := {}                # clocks, keys and powerups: Vector2i(col, row) -> their model ...
 var _floats := {}                 # ... and how it floats: [home, phase]
 
 
@@ -808,7 +963,7 @@ func _spawn_pellets() -> void:
 			var key := Vector2i(col, row)
 			pellets[key] = kind
 			if kind in [Eaten.CLOCK, Eaten.KEY]:
-				_add_pickup(key, kind, _clock() if kind == Eaten.CLOCK else _key())
+				_add_pickup(key, kind, _add_model("clock" if kind == Eaten.CLOCK else "key"))
 			elif kind == Eaten.STEEL:
 				_add_powerup(key)
 			else:
@@ -880,46 +1035,49 @@ func _add_pickup(key: Vector2i, kind: Eaten, node: Node3D) -> void:
 	node.position = home
 
 
-## The clock (side rooms): a tall glowing cyan crystal.
-func _clock() -> Node3D:
-	return _add_block(Vector3(0.28, 0.6, 0.28) * tile, _glass(Color(0.3, 0.9, 1.0, 0.75), Color(0.3, 1.3, 1.6), 0.1))
+## A model (models/<name>.glb, made by art-work/models.py), sized for this section's blocks and added to it.
+func _add_model(name: String, shadow := false) -> Node3D:
+	var node := Section.model(name, true, shadow)
+	node.scale = Vector3.ONE * tile
+	add_child(node)
+	return node
 
 
-## The key (side rooms): a magenta cube with a bar through it.
-func _key() -> Node3D:
-	var look := _glass(Color(1.0, 0.3, 1.0, 0.75), Color(1.5, 0.2, 1.5), 0.1)
-	var key := _add_block(Vector3.ONE * 0.32 * tile, look)
-	var bar := MeshInstance3D.new()
-	bar.mesh = BoxMesh.new()
-	bar.mesh.size = Vector3(0.7, 0.1, 0.1) * tile
-	bar.mesh.material = look
-	_outline(bar)
-	key.add_child(bar)
-	return key
+static var _models := {}          # name -> its scene, loaded once
+static var _outline_pass: ShaderMaterial
+
+## A new copy of a model (models/<name>.glb), at its own size (one block = 1): outlined (see _dress) unless `outline` is
+## false, and casting no shadow unless `shadow`.
+static func model(name: String, outline := true, shadow := false) -> Node3D:
+	if not _models.has(name):
+		_models[name] = load("res://models/%s.glb" % name)
+	var node: Node3D = _models[name].instantiate()
+	for mi: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+		if not shadow:
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if outline:
+			_dress(mi.mesh)
+	return node
 
 
-func _add_block(size: Vector3, look: Material) -> MeshInstance3D:
-	var block := MeshInstance3D.new()
-	block.mesh = BoxMesh.new()
-	block.mesh.size = size
-	block.mesh.material = look
-	block.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_outline(block)
-	add_child(block)
-	return block
-
-
-## Give a pickup piece (a box or sphere mesh) its black outline.
-static func _outline(piece: MeshInstance3D) -> void:
-	var m := ShaderMaterial.new()
-	m.shader = load("res://scripts/pickup_outline.gdshader")
-	m.set_shader_parameter("width_px", PICKUP_OUTLINE_PX)
-	if piece.mesh is SphereMesh:
-		m.set_shader_parameter("sphere", true)
-		m.set_shader_parameter("half_size", Vector3.ONE * piece.mesh.radius)
-	else:
-		m.set_shader_parameter("half_size", piece.mesh.size * 0.5)
-	piece.material_overlay = m
+## Give a model's materials their black outline: each marks the pixels it draws in the stencil buffer, and draws the
+## outline (model_outline.gdshader) round them as its next pass. Its materials are shared by every copy, so this only
+## does anything the first time.
+static func _dress(mesh: Mesh) -> void:
+	if _outline_pass == null:
+		_outline_pass = ShaderMaterial.new()
+		_outline_pass.shader = load("res://scripts/model_outline.gdshader")
+		_outline_pass.set_shader_parameter("width_px", PICKUP_OUTLINE_PX)
+		_outline_pass.render_priority = Material.RENDER_PRIORITY_MAX # after every model has marked its pixels
+	for k in mesh.get_surface_count():
+		var m := mesh.surface_get_material(k) as BaseMaterial3D
+		if m == null or m.next_pass != null:
+			continue
+		m.stencil_mode = BaseMaterial3D.STENCIL_MODE_CUSTOM
+		m.stencil_flags = BaseMaterial3D.STENCIL_FLAG_WRITE
+		m.stencil_compare = BaseMaterial3D.STENCIL_COMPARE_ALWAYS
+		m.stencil_reference = 1 # see model_outline.gdshader
+		m.next_pass = _outline_pass
 
 
 ## See-through, glowing material for the pickups and gate.
@@ -1003,6 +1161,15 @@ func is_powerup(kind: Eaten) -> bool:
 	return kind in POWERUPS
 
 
+const POWERUP_MODELS := {         # each powerup's model (models/<name>.glb)
+	Eaten.CLEAR_DOTS: "clear_dots",   # three blue pellets on a spinner
+	Eaten.STEEL: "steel",             # a riveted steel block
+	Eaten.SLUG_PACK: "slug_pack",     # a clip of three slugs
+	Eaten.EXTRA_SLUG: "extra_slug",   # one big slug
+	Eaten.CLOSE_TRAPS: "close_traps", # a green floor patch
+}
+
+
 ## A random powerup on tile `key`: clear-the-dots and close-the-traps come at most once per section.
 func _add_powerup(key: Vector2i) -> void:
 	var kind: Eaten
@@ -1012,41 +1179,7 @@ func _add_powerup(key: Vector2i) -> void:
 			break
 	if kind in [Eaten.CLEAR_DOTS, Eaten.CLOSE_TRAPS]:
 		_once[kind] = true
-	var node := Node3D.new()
-	add_child(node)
-	var glow := _glass(Color(1.0, 0.6, 0.1, 1.0), Color(2.0, 0.9, 0.1), 0.5) # slugs: orange
-	match kind:
-		Eaten.CLEAR_DOTS: # three blue pellets in a ring
-			for k in 3:
-				var a := k * TAU / 3.0
-				_piece(node, SphereMesh.new(), Vector3(cos(a), 0, sin(a)) * 0.22, Vector3.ONE * 0.2,
-					_glass(Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2), 0.05))
-		Eaten.STEEL: # a shiny steel block
-			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3.ONE * 0.36, steel_look())
-		Eaten.SLUG_PACK: # a row of three slugs
-			for k in [-1, 0, 1]:
-				_piece(node, BoxMesh.new(), Vector3(k * 0.2, 0, 0), Vector3.ONE * 0.13, glow)
-		Eaten.EXTRA_SLUG: # one big slug
-			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3.ONE * 0.22, glow)
-		Eaten.CLOSE_TRAPS: # a glowing green floor patch
-			_piece(node, BoxMesh.new(), Vector3.ZERO, Vector3(0.46, 0.07, 0.46),
-				_glass(Color(0.35, 1.0, 0.4, 1.0), Color(0.3, 1.3, 0.4), 0.5))
-	_add_pickup(key, kind, node)
-
-
-func _piece(parent: Node3D, mesh: PrimitiveMesh, at: Vector3, size: Vector3, look: Material) -> void:
-	var piece := MeshInstance3D.new()
-	if mesh is SphereMesh:
-		mesh.radius = size.x * 0.5 * tile
-		mesh.height = size.x * tile
-	else:
-		mesh.size = size * tile
-	mesh.material = look
-	piece.mesh = mesh
-	piece.position = at * tile
-	piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_outline(piece)
-	parent.add_child(piece)
+	_add_pickup(key, kind, _add_model(POWERUP_MODELS[kind]))
 
 
 ## Polished steel: Slock of Steel's powerup (and Slock while it lasts, see jelly.gd).
@@ -1101,24 +1234,36 @@ func _reachable() -> Dictionary:
 
 # ------------------------------------------------------------------ gate
 
-var _gate: StaticBody3D
+var _gate: StaticBody3D           # the barrier, while the gate is shut
+var _gate_frame: Node3D           # stays: after the gate opens, and round the wall when the exit is sealed
 
 
-## A solid glowing block in the exit, until every pellet is eaten (or the key is found).
+## The gate (models/gate.glb): a frame round the exit, and a solid glowing barrier in it until every pellet is eaten
+## (or the key is found).
 func close_gate() -> void:
 	if _gate != null:
 		return
+	var at := tile_centre(exit_tile())
+	if _gate_frame == null:
+		_gate_frame = _add_model("gate", true)
+		_gate_frame.get_node("barrier").free()
+		_gate_frame.position = at
 	_gate = StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	shape.shape = BoxShape3D.new()
 	shape.shape.size = Vector3(tile, tile * 1.2, tile)
+	shape.position = Vector3.UP * tile * 0.6
 	_gate.add_child(shape)
-	var block := MeshInstance3D.new()
-	block.mesh = BoxMesh.new()
-	block.mesh.size = shape.shape.size
-	block.mesh.material = _glass(Color(0.1, 0.8, 0.8, 0.6), Color(0.05, 0.7, 0.7), 0.1) # teal glass
-	_gate.add_child(block)
-	_gate.position = tile_centre(exit_tile()) + Vector3.UP * tile * 0.6
+	var gate := Section.model("gate", false)
+	var barrier: MeshInstance3D = gate.get_node("barrier")
+	gate.remove_child(barrier)
+	gate.free()
+	var field := ShaderMaterial.new()
+	field.shader = load("res://scripts/gate_barrier.gdshader")
+	barrier.material_override = field
+	barrier.scale = Vector3.ONE * tile
+	_gate.add_child(barrier)
+	_gate.position = at
 	add_child(_gate)
 
 

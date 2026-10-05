@@ -1,9 +1,9 @@
 class_name Slug
 extends Node3D
-## Slock's emergency slug: a small glowing projectile fired along one of the four grid directions. It flies
-## straight at Slock's height, killing the first swurm it reaches or blasting the first inner wall block into
-## floor; an outer wall or a locked gate stops it, and it fizzles after RANGE tiles. main.gd fires it and
-## handles what it hits.
+## Slock's emergency slug: a small glowing block (the head of models/slug.glb) fired along one of the four grid
+## directions. It flies straight at Slock's height, killing the first swurm it reaches or blasting the first inner
+## wall block into floor; an outer wall or a locked gate stops it, and it fizzles after RANGE tiles. main.gd fires
+## it and handles what it hits.
 
 const RANGE := 4                  # tiles
 const SPEED := 24.0               # tiles/s
@@ -21,16 +21,11 @@ static func fire(from: Vector3, direction: Vector3, in_section: Section) -> Slug
 	slug.section = in_section
 	slug.dir = direction
 	slug.position = from + direction * 0.6 * in_section.tile
-	var cube := MeshInstance3D.new()
-	cube.mesh = BoxMesh.new()
-	cube.mesh.size = Vector3.ONE * 0.15 * in_section.tile
-	var glow := StandardMaterial3D.new()
-	glow.albedo_color = Color(1.0, 0.6, 0.1)
-	glow.emission_enabled = true
-	glow.emission = Color(2.0, 0.9, 0.1)
-	cube.mesh.material = glow
-	Section._outline(cube)
-	slug.add_child(cube)
+	var head := Section.model("slug") # the glowing block off the top of a slug round, without its casing
+	head.get_node("casing").free()
+	head.get_node("head").position = Vector3.ZERO
+	head.scale = Vector3.ONE * 1.5 * in_section.tile
+	slug.add_child(head)
 	return slug
 
 
