@@ -1,0 +1,67 @@
+# Builds the game for Windows, Mac and Linux and publishes a GitHub release with the three downloads, when a version
+# tag (like v0.8.0) is pushed, or when run by hand from the Actions tab for a tag that already exists. The release's
+# notes come from .github/release-notes.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The version tag to release (it must already exist), like v0.8.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Godot and its export templates
+        run: |
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          curl -sSLf -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          curl -sSLf -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          templates=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$templates"
+          unzip -q -j templates.tpz templates/version.txt templates/linux_release.x86_64 \
+            templates/windows_release_x86_64.exe templates/macos.zip -d "$templates"
+          rm godot.zip templates.tpz
+
+      # A fresh checkout has no imported assets yet (Godot keeps them in .godot/, which git ignores).
+      - name: Import the project
+        run: ./godot --headless --path . --import
+
+      - name: Export
+        run: |
+          mkdir -p Builds/Linux/Slock Builds/Windows/Slock Builds/Mac
+          ./godot --headless --path . --export-release Linux Builds/Linux/Slock/Slock.x86_64
+          ./godot --headless --path . --export-release Windows Builds/Windows/Slock/Slock.exe
+          ./godot --headless --path . --export-release Mac Builds/Mac/Slock.zip
+          test -s Builds/Linux/Slock/Slock.x86_64 && test -s Builds/Windows/Slock/Slock.exe && test -s Builds/Mac/Slock.zip
+
+      - name: Package
+        run: |
+          tar -czf Slock-Linux.tar.gz -C Builds/Linux Slock
+          (cd Builds/Windows && zip -qr ../../Slock-Windows.zip Slock)
+          cp Builds/Mac/Slock.zip Slock-Mac.zip
+          ls -l Slock-*
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" Slock-Windows.zip Slock-Mac.zip Slock-Linux.tar.gz --verify-tag --prerelease \
+            --title "Slock $TAG (early pre-release)" --notes-file .github/release-notes.md
