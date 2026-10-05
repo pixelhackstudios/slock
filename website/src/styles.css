@@ -19,6 +19,11 @@
   color-scheme: dark;
 }
 
+/* Ultrawide: the words keep to a band 1.9 times the height across, in the middle, as the 3D shots do (World.WIDEST). */
+@media (min-aspect-ratio: 19/10) and (min-width: 1400px) {
+  :root { --gutter: calc((100vw - 190vh) / 2 + 72px); }
+}
+
 * { box-sizing: border-box; }
 
 html { background: var(--void); }

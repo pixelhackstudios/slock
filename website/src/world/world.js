@@ -17,6 +17,7 @@ const HIT_REACH = 0.9
 const HIT_COOLDOWN = 1
 const SWURM_RESPAWN = 8
 const IDLE_AUTOPILOT = 4          // seconds without input before the autopilot takes over again
+const WIDEST = 1.9                // the shots are framed for screens up to this wide; wider ones show more void
 
 export class World {
   constructor(canvas, { dpr = Math.min(window.devicePixelRatio, 2), samples = 4, shadowSize = 2048 } = {}) {
@@ -151,11 +152,11 @@ export class World {
   }
 
   // The projection, with the picture slid over by `_shift` (fractions of the width and height: right and down) to make
-  // room for words.
+  // room for words. On an ultrawide screen it's a fraction of the band the words keep to (see styles.css).
   _project() {
     const { x: w, y: h } = this.size
     const [sx, sy] = this._shift
-    if (sx || sy) this.camera.setViewOffset(w, h, -sx * w, -sy * h, w, h)
+    if (sx || sy) this.camera.setViewOffset(w, h, -sx * Math.min(w, h * WIDEST), -sy * h, w, h)
     else this.camera.clearViewOffset()
     this.camera.updateProjectionMatrix()
     this.frame.inverseProjection.value.copy(this.camera.projectionMatrixInverse)
