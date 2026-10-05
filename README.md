@@ -47,7 +47,8 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 - Tilt gently to **creep**; tilt hard to **slide**. Level the board and Slock stops. The dial in the corner shows
   your tilt: inside its small ring is level.
 - Slock runs along the corridors and turns into side openings when you tilt toward them — but come in too fast and you'll slide right past.
-- **Holes and open edges are deadly.** Fall off and the run is over.
+- **Holes and open edges are deadly.** Fall off and you lose a life: you start again at the gate you came in by,
+  with the section just as you left it. You start with **3 lives**; lose the last one and the run is over.
 
 ### The clock
 
@@ -88,6 +89,7 @@ Each section has three powerups scattered at random, and they work the moment yo
 | Three slugs | +3 slugs |
 | One big slug | One extra slug |
 | Green patch | Every hole is filled in and every gap in the outer walls is closed off, in the section and its side room (at most one per section) |
+| Little red Slock | An extra life (at most one per section). Keep as many as you can collect |
 
 ### Gates and sections
 

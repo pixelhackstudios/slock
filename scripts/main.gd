@@ -5,7 +5,9 @@ extends Node3D
 ## third of your time when they hit you, unless a power pellet is active: then they're scared and slow, and
 ## eating one gives time back. Eat every blue pellet to open the gate, or find the side room's key (gold and power
 ## pellets only add time); go through for a time bonus, and the climb ramp boosts you up into the next section. The
-## run ends when time runs out, or you fall down a pit or off an edge.
+## run ends when time runs out, or when you fall down a pit or off an edge with no lives left: you start with three,
+## each fall costs one and puts you back at the gate you came in by with the section just as it was, and a little
+## red Slock (a powerup) is one more.
 ## Slugs: left click to aim (the game freezes; tilt picks a direction), left click again to fire, right click to
 ## back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent ones carry
 ## over, pickups add to it, and each gate adds a growing allowance on top. Powerups float in each section and come back 10 s after being taken.
@@ -29,6 +31,7 @@ const SWURM_POINTS := 200         # doubles for each more eaten on the same powe
 const FLOOR_POINTS := 250         # through a gate: this times the floor number
 const PROGRESS_POINTS := 10       # per unit of your furthest progress up the course
 const FALL_DISTANCE := 5.0        # this far below the maze floor counts as falling off (side rooms are 3 below)
+const START_LIVES := 3            # falls you can take; the extra-life powerup adds one, with no limit
 
 const SECTIONS_AHEAD := 2         # sections built beyond the one Slock is in ...
 const SECTIONS_BEHIND := 1        # ... and kept behind it
@@ -72,6 +75,7 @@ var _released := {}               # sections whose swurms have been let out
 var _sealed_up_to := -1           # sections whose exit has been walled up behind Slock
 var slugs := START_SLUGS
 var _slug_allowance := START_SLUGS # added at each gate, one more each time
+var lives := START_LIVES
 var _flying: Array[Slug] = []
 var aiming := false               # slug aim mode: the game is frozen, tilt picks the direction, click fires
 var _aim := Vector2i(0, 1)        # the direction picked (on the grid: +y is up the course)
@@ -154,6 +158,7 @@ func _start_run(play := true) -> void:
 	_run_seconds = 0.0
 	slugs = START_SLUGS
 	_slug_allowance = START_SLUGS
+	lives = START_LIVES
 	for slug in _flying:
 		slug.queue_free()
 	_flying.clear()
@@ -299,6 +304,7 @@ func _process(delta: float) -> void:
 	hud.show_status(score(), time_left, here.pellets_left(), maxf(0.0, power_until - now), height,
 		Section.block_of(height))
 	hud.show_slugs(slugs, false)
+	hud.show_lives(lives)
 	hud.show_steel(maxf(0.0, _steel_until - now))
 
 
@@ -325,7 +331,7 @@ func _physics_process(delta: float) -> void:
 		sections[current - 1].seal_exit()
 
 	if p.y < here.floor_y - FALL_DISTANCE:
-		_end_run("YOU SLID OFF THE EDGE")
+		_fall(here)
 		return
 	_fly_slugs(delta)
 	if slock.launching:
@@ -357,7 +363,7 @@ func _physics_process(delta: float) -> void:
 				here.open_gate()
 			hud.popup("KEY!  GATE OPEN", Color(1.0, 0.4, 1.0), 1.6)
 		Section.Eaten.STEEL, Section.Eaten.CLEAR_DOTS, Section.Eaten.CLOSE_TRAPS, Section.Eaten.SLUG_PACK, \
-				Section.Eaten.EXTRA_SLUG:
+				Section.Eaten.EXTRA_SLUG, Section.Eaten.LIFE:
 			here.powerup_taken(now)
 			_powerup(eaten, here, p)
 		Section.Eaten.POWER:
@@ -486,6 +492,24 @@ func _powerup(kind: Section.Eaten, here: Section, p: Vector3) -> void:
 			sounds.slug_click()
 			slugs += 1
 			hud.popup("+1 SLUG  x%d" % slugs, Color(1.0, 0.85, 0.3), 1.4)
+		Section.Eaten.LIFE:
+			sounds.big_pop()
+			lives += 1
+			hud.popup("+1 LIFE  x%d" % lives, Hud.RED, 1.4)
+
+
+## Fell off: a life gone. With lives left, Slock is back at the gate this section was entered by (the start, on the
+## first section), the board level, and the section just as it was; with none, the run is over.
+func _fall(here: Section) -> void:
+	lives -= 1
+	if lives <= 0:
+		_end_run("OUT OF LIVES")
+		return
+	slock.reset_to(here.start_position(slock.height))
+	rig.reset_trackball()
+	rig.snap_to_target()
+	sounds.ouch()
+	hud.popup("LIFE LOST   x%d LEFT" % lives, Hud.RED, 1.6)
 
 
 ## Slock of Steel: push (tilt) into an inner wall next to you and it breaks. The look blinks back to jelly through

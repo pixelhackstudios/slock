@@ -27,7 +27,7 @@ const DEPTH := 1.0                # how far blocks reach below the lowest floor 
 
 enum { VOID, FLOOR, WALL }
 enum Level { MAIN, LOW, CLIMB, SIDE } # the maze, the side room, the climb ramp, the side ramp
-enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY, STEEL, CLEAR_DOTS, CLOSE_TRAPS, SLUG_PACK, EXTRA_SLUG }
+enum Eaten { NOTHING, PELLET, GOLD, POWER, CLOCK, KEY, STEEL, CLEAR_DOTS, CLOSE_TRAPS, SLUG_PACK, EXTRA_SLUG, LIFE }
 
 var index := 0
 var layout: Array[String]         # see the characters above
@@ -1150,10 +1150,13 @@ func remove_pellets(fraction: float) -> int:
 
 # ------------------------------------------------------------------ powerups
 
-const POWERUPS: Array[Eaten] = [Eaten.CLEAR_DOTS, Eaten.STEEL, Eaten.SLUG_PACK, Eaten.EXTRA_SLUG, Eaten.CLOSE_TRAPS]
+const POWERUPS: Array[Eaten] = [Eaten.CLEAR_DOTS, Eaten.STEEL, Eaten.SLUG_PACK, Eaten.EXTRA_SLUG, Eaten.CLOSE_TRAPS,
+	Eaten.LIFE]
+const ONCE_A_SECTION: Array[Eaten] = [Eaten.CLEAR_DOTS, Eaten.CLOSE_TRAPS, Eaten.LIFE]
+const LIFE_SIZE := 0.4            # the extra life is a little Slock, this many blocks across
 const POWERUP_RESPAWN := 10.0     # seconds after one is taken until a new one appears, somewhere already cleared
 
-var _once := {}                   # clear-the-dots and close-the-traps: at most one of each per section
+var _once := {}                   # ONCE_A_SECTION powerups this section has had
 var _powerups_due: Array[float] = []
 
 
@@ -1170,16 +1173,29 @@ const POWERUP_MODELS := {         # each powerup's model (models/<name>.glb)
 }
 
 
-## A random powerup on tile `key`: clear-the-dots and close-the-traps come at most once per section.
+## A random powerup on tile `key`: clear-the-dots, close-the-traps and the extra life come at most once per section.
 func _add_powerup(key: Vector2i) -> void:
 	var kind: Eaten
 	while true:
 		kind = POWERUPS.pick_random()
 		if not _once.has(kind):
 			break
-	if kind in [Eaten.CLEAR_DOTS, Eaten.CLOSE_TRAPS]:
+	if kind in ONCE_A_SECTION:
 		_once[kind] = true
-	_add_pickup(key, kind, _add_model(POWERUP_MODELS[kind]))
+	_place_powerup(key, kind)
+
+
+## Powerup `kind` on tile `key`: its model, or for an extra life, a little Slock (the same jelly, see jelly.gd).
+func _place_powerup(key: Vector2i, kind: Eaten) -> void:
+	var node: Node3D
+	if kind == Eaten.LIFE:
+		node = Jelly.new(Vector3(1.0, Slock.HEIGHT_RATIO, 1.0) * LIFE_SIZE * tile)
+		for mi: MeshInstance3D in node.find_children("*", "MeshInstance3D", true, false):
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF # like the other pickups
+		add_child(node)
+	else:
+		node = _add_model(POWERUP_MODELS[kind])
+	_add_pickup(key, kind, node)
 
 
 ## Polished steel: Slock of Steel's powerup (and Slock while it lasts, see jelly.gd).

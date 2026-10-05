@@ -1,8 +1,8 @@
 class_name Hud
 extends CanvasLayer
-## The on-screen display: score (top left), remaining time (top centre, blinking red under 10 s), height, pellets
-## left and block size (top right), the power and steel countdowns, the slug count, pop-up messages and the green
-## flash when a swurm steals time; and the title, pause and game-over screens, with the leaderboard. It keeps
+## The on-screen display: score and lives (top left), remaining time (top centre, blinking red under 10 s), height,
+## pellets left and block size (top right), the power and steel countdowns, the slug count, pop-up messages and the
+## green flash when a swurm steals time; and the title, pause and game-over screens, with the leaderboard. It keeps
 ## running while the game is paused.
 
 signal name_submitted(name: String)
@@ -22,6 +22,7 @@ var _pellets: Label
 var _height: Label
 var _block: Label
 var _slugs: Label
+var _lives: Label
 var _steel: Label
 var _power: Label
 var _popups: VBoxContainer
@@ -45,6 +46,7 @@ func _init() -> void:
 	_status = _full_rect(self)
 	_label(_status, "SCORE", 18, RED, HORIZONTAL_ALIGNMENT_LEFT, 20)
 	_score = _label(_status, "0", 52, RED, HORIZONTAL_ALIGNMENT_LEFT, 40)
+	_lives = _label(_status, "", 18, RED, HORIZONTAL_ALIGNMENT_LEFT, 112)
 	_label(_status, "REMAINING TIME", 18, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 20)
 	_time = _label(_status, "", 52, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 40)
 	_label(_status, "HEIGHT", 18, CYAN, HORIZONTAL_ALIGNMENT_RIGHT, 20)
@@ -94,6 +96,11 @@ func show_slugs(count: int, aiming: bool) -> void:
 		_slugs.text = "AIMING — TILT TO PICK, LEFT CLICK FIRES, RIGHT CLICK CANCELS"
 	else:
 		_slugs.text = "SLUGS x%d — CLICK TO AIM" % count if count > 0 else "NO SLUGS"
+
+
+## Lives left (under the score).
+func show_lives(count: int) -> void:
+	_lives.text = "LIVES x%d" % count
 
 
 ## Slock of Steel's countdown.
