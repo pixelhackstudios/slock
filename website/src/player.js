@@ -9,6 +9,7 @@ const SONGS = [ // name, file, length in seconds (to show before a song has load
   ['Theme 12', 'theme-012', 185], ['Theme 13', 'theme-013', 174],
 ]
 const BASE = `${import.meta.env.BASE_URL}media/music/`
+const BOOST = 3 // the songs are mastered quiet (about -25 LUFS, peaks near -12 dB): this lifts them ~9.5 dB
 
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
@@ -80,7 +81,14 @@ export function setupPlayer() {
       }
     })
   }
+  let boosted = false
   const start = () => {
+    if (!boosted) { // louder than the element's own volume allows (set up on the first press: browsers need a click)
+      boosted = true
+      const ctx = new AudioContext()
+      const gain = new GainNode(ctx, { gain: BOOST })
+      ctx.createMediaElementSource(audio).connect(gain).connect(ctx.destination)
+    }
     if (loaded !== current()) {
       audio.src = `${BASE}${SONGS[current()][1]}.m4a`
       loaded = current()
