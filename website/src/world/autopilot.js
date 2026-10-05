@@ -11,8 +11,8 @@ export class Autopilot {
     this.section = section
     this.body = body
     this.rig = rig
-    this.gentle = 0.56   // how hard it tilts (stick, before the response curve) into a turn ...
-    this.bold = 0.75     // ... and down a long straight
+    this.gentle = 0.72   // how hard it tilts (stick, before the response curve) into a turn ...
+    this.bold = 0.95     // ... and down a long straight
     this._path = null
     this._replanAt = 0
     this._restFrom = 6  // now and then it levels the board and lets Slock stop, as a player does

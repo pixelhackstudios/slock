@@ -23,7 +23,7 @@ const GUIDE_BRAKE = 20
 const LAUNCH_DURATION = 0.55
 const FALL_DISTANCE = 5
 // On a flat floor (slock.gd has the reasons)
-const TOP_SPEED = 28
+const TOP_SPEED = 15
 const ACCEL = 40
 const ACCEL_EASE = 5
 const BRAKE = 175

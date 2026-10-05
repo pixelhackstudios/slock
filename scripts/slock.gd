@@ -13,7 +13,7 @@ const MAX_SPEED := 60.0           # safety limit only, well above what gravity r
 
 # On a flat floor the tilt sets the speed and Slock eases to it: a gentle tilt is a steady creep, full tilt full speed,
 # the same every time. (A tilt that set an acceleration left no middle speed: a crawl, or faster and faster.)
-const TOP_SPEED := 28.0           # blocks/s at full tilt (more in later sections: it ramps up with gravity)
+const TOP_SPEED := 15.0           # blocks/s at full tilt (more in later sections: it ramps up with gravity)
 const ACCEL := 40.0               # blocks/s^2 at most, speeding up ...
 const ACCEL_EASE := 5.0           # ... easing into the speed the tilt asks for (per second)
 const BRAKE := 175.0              # blocks/s^2 at most, slowing to a lower speed ...
