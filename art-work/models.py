@@ -426,14 +426,14 @@ def bake_set(name, build, tiles_x=True, tiles_y=True, ao_distance=0.1, emission=
 def floor_surface():
     """A floor block: four square tiles with cut corners, grey grout, orange octagonal studs where they meet."""
     tile = material("tile", srgb(0.89, 0.88, 0.85), rough=0.5, vary=0.025)
-    grout = material("grout", srgb(0.36, 0.36, 0.37), rough=0.85, grime=0.5)
+    grout = material("grout", srgb(0.46, 0.46, 0.47), rough=0.85, grime=0.5)
     stud = material("stud", srgb(0.98, 0.56, 0.12), rough=0.3, grime=0.3)
     stud_rim = material("stud_rim", srgb(0.42, 0.24, 0.08), rough=0.5, grime=0.3)
     obs = [prism("bed", [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)], -0.05, 0.0, grout)]
     for cx in (-0.25, 0.25):
         for cy in (-0.25, 0.25):
-            obs.append(prism("tile", chamfered_square(0.232, 0.232, 0.05, cx, cy), 0.0, 0.016, tile,
-                             edge=0.007, segments=3))
+            obs.append(prism("tile", chamfered_square(0.241, 0.241, 0.045, cx, cy), 0.0, 0.016, tile,
+                             edge=0.005, segments=3))
     for cx in (-0.5, 0.0, 0.5):
         for cy in (-0.5, 0.0, 0.5):
             obs.append(prism("stud_rim", octagon(0.046, cx, cy), 0.0, 0.013, stud_rim, edge=0.004))
@@ -447,7 +447,7 @@ def wall_surface():
     The face runs from the floor up to the wall's rounded top edge (RIM below the top of the image); its left and
     right edges wrap round the block's rounded corners."""
     panel = material("panel", srgb(0.8, 0.8, 0.79), rough=0.55, vary=0.0)
-    conduit = material("conduit", srgb(0.2, 0.21, 0.23), rough=0.4, metal=0.6, grime=0.4)
+    conduit = material("conduit", srgb(0.3, 0.31, 0.33), rough=0.4, metal=0.6, grime=0.4)
     bolt = material("bolt", srgb(0.3, 0.56, 0.78), rough=0.32, grime=0.3)
     bolt_rim = material("bolt_rim", srgb(0.12, 0.22, 0.33), rough=0.45, grime=0.3)
     kick = material("kick", srgb(0.6, 0.6, 0.6), rough=0.6)
@@ -465,15 +465,15 @@ def wall_surface():
     cols = (-0.34, 0.0, 0.34)
     rows = (mid - 0.31, mid, mid + 0.31)
     for x in cols:   # conduits: rounded bars lying on the panel
-        obs.append(cylinder("conduit", 0.009, rows[2] - rows[0], 12, conduit, location=(x, mid, 0.004)))
+        obs.append(cylinder("conduit", 0.0065, rows[2] - rows[0], 12, conduit, location=(x, mid, 0.003)))
         obs[-1].rotation_euler = (math.radians(90), 0, 0)
     for y in rows:
-        obs.append(cylinder("conduit", 0.009, cols[2] - cols[0], 12, conduit, location=(0, y, 0.004),
+        obs.append(cylinder("conduit", 0.0065, cols[2] - cols[0], 12, conduit, location=(0, y, 0.003),
                             rotation=(0, math.radians(90), 0)))
     for x in cols:
         for y in rows:
-            obs.append(rounded_box("bolt_rim", (0.066, 0.066, 0.016), 0.01, 2, bolt_rim, location=(x, y, 0.004)))
-            obs.append(rounded_box("bolt", (0.05, 0.05, 0.026), 0.009, 3, bolt, location=(x, y, 0.006)))
+            obs.append(rounded_box("bolt_rim", (0.056, 0.056, 0.016), 0.009, 2, bolt_rim, location=(x, y, 0.004)))
+            obs.append(rounded_box("bolt", (0.043, 0.043, 0.026), 0.008, 3, bolt, location=(x, y, 0.006)))
     return obs
 
 
@@ -483,19 +483,19 @@ def cap_surface():
     so the frame stays flat here)."""
     frame = material("frame", srgb(0.88, 0.87, 0.85), rough=0.5)
     panel = material("panel", srgb(0.9, 0.89, 0.87), rough=0.45, vary=0.0)
-    channel = material("channel", srgb(0.55, 0.55, 0.57), rough=0.7, grime=0.6)
+    channel = material("channel", srgb(0.6, 0.6, 0.62), rough=0.7, grime=0.6)
     screw = material("screw", srgb(0.62, 0.64, 0.68), rough=0.3, metal=0.9, grime=0.3)
     inner = 0.5 - RIM - 0.055                    # the frame's inner edge
     obs = [prism("channel", [(-0.6, -0.6), (0.6, -0.6), (0.6, 0.6), (-0.6, 0.6)], -0.05, -0.012, channel)]
     obs.append(ring_prism("frame", chamfered_square(0.6, 0.6, 0.1), chamfered_square(inner, inner, 0.085),
                           -0.012, 0.0, frame, edge=0.004))
-    obs.append(prism("panel", chamfered_square(inner - 0.03, inner - 0.03, 0.07), -0.012, 0.002, panel,
-                     edge=0.006, segments=3))
+    obs.append(prism("panel", chamfered_square(inner - 0.016, inner - 0.016, 0.077), -0.012, 0.002, panel,
+                     edge=0.004, segments=3))
     for k in range(4):   # bridges across the channel
         a = k * math.pi / 2
         c, s_ = math.cos(a), math.sin(a)
-        r = inner - 0.015
-        ob = rounded_box("bridge", (0.035, 0.06, 0.012), 0.004, 2, frame, location=(c * r, s_ * r, -0.006))
+        r = inner - 0.008
+        ob = rounded_box("bridge", (0.024, 0.05, 0.012), 0.004, 2, frame, location=(c * r, s_ * r, -0.006))
         ob.rotation_euler = (0, 0, a)
         obs.append(ob)
     for sx in (-1, 1):   # screws in the frame's cut corners
@@ -509,12 +509,12 @@ def cap_surface():
 def cliff_surface():
     """The sheer sides of a section, below its floor: big plain panels with ribs and corner bolts, a shade darker
     than the walls so the maze stands out from its foundations."""
-    seam = material("seam", srgb(0.22, 0.22, 0.24), rough=0.8, grime=0.5)
+    seam = material("seam", srgb(0.3, 0.3, 0.32), rough=0.8, grime=0.5)
     panel = material("panel", srgb(0.6, 0.61, 0.63), rough=0.6, vary=0.03)
     rib = material("rib", srgb(0.56, 0.57, 0.6), rough=0.55)
     bolt = material("bolt", srgb(0.3, 0.56, 0.78), rough=0.35, grime=0.3)
     obs = [prism("seam", [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)], -0.05, 0.0, seam)]
-    obs.append(prism("panel", chamfered_square(0.478, 0.478, 0.05), 0.0, 0.02, panel, edge=0.007, segments=3))
+    obs.append(prism("panel", chamfered_square(0.488, 0.488, 0.03), 0.0, 0.02, panel, edge=0.005, segments=3))
     for y in (-0.16, 0.16):
         obs.append(prism("rib", chamfered_square(0.33, 0.022, 0.018, 0.0, y), 0.02, 0.03, rib, edge=0.004))
     for sx in (-1, 1):

@@ -932,7 +932,7 @@ const POWER_RADIUS := 0.23        # power pellets: big glowing orbs (0.46 blocks
 const PICKUP_HEIGHT := 0.6        # power pellets, clocks and keys float higher ...
 const PICKUP_BOB := 0.12          # ... and bob more
 const OUTLINE_PX := 0.5           # black outline width round the orbs, in screen pixels
-const PICKUP_OUTLINE_PX := 1.5    # ... and round the models: the clocks, keys and powerups, and the gate
+const PICKUP_OUTLINE_PX := 0.75   # ... and round the models: the clocks, keys and powerups, and the gate
 
 var _pellets_left := 0            # blue pellets still uneaten: the gate opens at none (gold and power pellets
                                   # only add time)
