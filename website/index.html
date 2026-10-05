@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slock</title>
+    <meta name="description" content="A free game for Windows, Mac and Linux: tilt the world to slide a jelly block through a maze that never ends." />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/svg+xml" href="/slock/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://pixelhackstudios.github.io/slock/" />
+    <meta property="og:title" content="Slock" />
+    <meta property="og:description" content="Tilt the world to slide a jelly block through a maze that never ends. Free for Windows, Mac and Linux." />
+    <meta property="og:image" content="https://pixelhackstudios.github.io/slock/share.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <canvas id="world" aria-hidden="true"></canvas>
+    <div class="loader" aria-hidden="true">
+      <div class="loader-row"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><b></b></div>
+    </div>
+
+    <header class="bar">
+      <a class="bar-mark" href="#top" data-scroll>Slock</a>
+      <nav aria-label="Sections">
+        <a href="#play" data-scroll>How to play</a>
+        <a href="#powerups" data-scroll>Powerups</a>
+        <a href="#watch" data-scroll>Watch</a>
+      </nav>
+      <a class="bar-get" href="#download" data-scroll>Download</a>
+    </header>
+
+    <main>
+      <section class="hero" id="top" data-shot="hero">
+        <p class="hero-credit">A Pixelhack Studios production, in association with Scott O'Nanski</p>
+        <h1 class="wordmark" aria-label="Slock"><span aria-hidden="true">SLOCK</span></h1>
+        <div class="hero-foot">
+          <div class="hero-pitch">
+            <p class="lede">Tilt the world to slide a jelly block through a maze that never ends.</p>
+            <div class="get">
+              <a class="btn" data-download href="https://github.com/pixelhackstudios/slock/releases/latest">Download free</a>
+              <p class="get-note"><span data-version>Windows, Mac and Linux</span></p>
+            </div>
+          </div>
+          <div class="hint">
+            <svg class="dial" viewBox="-60 -60 120 120" aria-hidden="true">
+              <circle class="dial-face" r="56" />
+              <path class="dial-cross" d="M-56 0H56M0 -56V56" />
+              <circle class="dial-level" r="7.4" />
+              <circle class="dial-dot" r="5" />
+            </svg>
+            <p class="hint-text"><span class="if-mouse">Move your mouse to tilt the maze.</span>
+              <button class="if-touch tilt-phone" type="button">Tilt with your phone</button></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter chapter--tall" id="play" data-shot="tilt">
+        <div class="sticky scrim-left">
+          <div class="copy">
+            <h2>You don't move the block. You tilt the world.</h2>
+            <div class="states-row">
+              <svg class="dial" viewBox="-60 -60 120 120" aria-hidden="true">
+                <circle class="dial-face" r="56" />
+                <path class="dial-cross" d="M-56 0H56M0 -56V56" />
+                <circle class="dial-level" r="7.4" />
+                <circle class="dial-dot" r="5" />
+              </svg>
+              <ul class="states" aria-label="How Slock moves">
+                <li data-state="creep">Tilt a little and it creeps.</li>
+                <li data-state="slide">Tilt hard and it slides.</li>
+                <li data-state="stop">Level the board and it stops.</li>
+              </ul>
+            </div>
+            <p>It runs along the corridors and turns into side openings when you lean that way. Come in too fast and you'll slide right past.</p>
+            <p class="aside if-mouse">Go on, move your mouse. It's the real thing, running in your browser.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter scrim-right" id="eat" data-shot="eat">
+        <div class="copy copy--right">
+          <h2>Eat the blue ones. Beat the clock.</h2>
+          <p>You start with 35 seconds, and every pellet buys more. Clear the blue pellets, or find the key in the side room, and the gate at the far end opens.</p>
+          <dl class="times">
+            <div><dt>Blue pellet</dt><dd>+1s</dd></div>
+            <div><dt>Gold pellet</dt><dd>+2s</dd></div>
+            <div><dt>Clock</dt><dd>+20s</dd></div>
+            <div><dt>Through a gate</dt><dd>Bonus</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="chapter chapter--tall" id="swurms" data-shot="swurms">
+        <div class="sticky scrim-left">
+          <div class="copy">
+            <h2>Mind the Swurms.</h2>
+            <p>Green jelly worms crawl out of the pen in the middle, one at a time, and every section has one more. Touch one and it steals a third of your time.</p>
+            <p class="power">Grab a big gold pellet and they turn blue for ten seconds. Now you eat them, and get your time back.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter chapter--shelf" id="powerups" data-shot="shelf">
+        <div class="shelf-head">
+          <h2>Powerups</h2>
+          <p>They work the moment you touch one, and another turns up ten seconds later somewhere you've already cleared.</p>
+        </div>
+        <ol class="shelf" aria-label="The powerups">
+          <li data-pickup="clear_dots"><h3>Three blue dots</h3><p>A quarter of the pellets vanish.</p></li>
+          <li data-pickup="steel"><h3>Steel block</h3><p>Slock of Steel: smash through walls and Swurms for ten seconds.</p></li>
+          <li data-pickup="slug_pack"><h3>Three slugs</h3><p>Three more slugs.</p></li>
+          <li data-pickup="extra_slug"><h3>One big slug</h3><p>One more slug.</p></li>
+          <li data-pickup="close_traps"><h3>Green patch</h3><p>Every hole fills in and every gap in the walls closes.</p></li>
+          <li data-pickup="life"><h3>Little red Slock</h3><p>One more life. Hoard them.</p></li>
+        </ol>
+        <p class="slugs"><strong>Slugs:</strong> click to aim, click again to fire. Blast a Swurm, or knock a hole through a wall.</p>
+      </section>
+
+      <section class="chapter chapter--tall" id="climb" data-shot="climb">
+        <div class="sticky scrim-left">
+          <div class="copy">
+            <h2>It keeps going up.</h2>
+            <p>Every gate leads up to a new section. The blocks get smaller, the mazes get denser, and there's another Swurm.</p>
+            <p>You have three lives. Fall off and you're back at that section's gate, with everything just as you left it.</p>
+            <p class="aside">Make the top ten and your name goes on the leaderboard.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter chapter--watch" id="watch" data-shot="watch">
+        <h2>Watch a run</h2>
+        <figure class="reel">
+          <video data-src="media/run.mp4" poster="media/run.jpg" muted loop playsinline preload="none" controls></video>
+          <figcaption>Recorded straight from the game. Turn the sound on for the music.</figcaption>
+        </figure>
+      </section>
+
+      <section class="download" id="download">
+        <div class="download-inner">
+          <h2>Free. Go play.</h2>
+          <p class="lede">No account, no installer. Download it, unzip it, play.</p>
+          <div class="get get--big">
+            <a class="btn btn--big" data-download href="https://github.com/pixelhackstudios/slock/releases/latest">Download free</a>
+            <ul class="platforms" aria-label="All downloads">
+              <li><a data-platform="windows" href="https://github.com/pixelhackstudios/slock/releases/latest">Windows</a></li>
+              <li><a data-platform="mac" href="https://github.com/pixelhackstudios/slock/releases/latest">Mac</a></li>
+              <li><a data-platform="linux" href="https://github.com/pixelhackstudios/slock/releases/latest">Linux</a></li>
+            </ul>
+            <p class="get-note" data-version-long>The newest version, straight from GitHub.</p>
+          </div>
+          <p class="mac-note">On a Mac, the first time: right-click Slock.app and choose Open. It isn't signed by Apple yet, so a double-click won't open it.</p>
+          <h3>Controls</h3>
+          <dl class="controls">
+            <div><dt><kbd>Mouse</kbd></dt><dd>Tilt the world</dd></div>
+            <div><dt><kbd>Left click</kbd></dt><dd>Aim a slug, then click again to fire</dd></div>
+            <div><dt><kbd>Right click</kbd></dt><dd>Stop aiming (you keep the slug)</dd></div>
+            <div><dt><kbd>Esc</kbd></dt><dd>Pause</dd></div>
+            <div><dt><kbd>R</kbd></dt><dd>Restart</dd></div>
+          </dl>
+          <p class="gamepad">A gamepad's left stick tilts too.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p>Slock is a Pixelhack Studios production, in association with Scott O'Nanski.</p>
+      <ul>
+        <li><a href="https://github.com/pixelhackstudios/slock">Source on GitHub</a></li>
+        <li><a href="https://github.com/pixelhackstudios/slock/issues">Report a problem</a></li>
+        <li><a href="https://buymeacoffee.com/d0qtanhk43">Buy me a coffee</a></li>
+        <li><a href="https://www.pixelhackstudios.com">pixelhackstudios.com</a></li>
+      </ul>
+      <p class="licence">Code: MIT. Art: CC BY 4.0.</p>
+    </footer>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

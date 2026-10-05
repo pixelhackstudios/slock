@@ -1,5 +1,7 @@
 # slock-web
 
+**Retired:** the site is now built from [`website/`](../website). Nothing in this folder is published any more.
+
 The Slock website: https://pixelhackstudios.github.io/slock/
 
 Vite + React + Tailwind CSS 4, with GSAP and Lenis for motion. Same stack and design language as

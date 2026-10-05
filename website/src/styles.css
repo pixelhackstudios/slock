@@ -1,0 +1,453 @@
+/* Slock's site. The colours are the game's: the void it floats in, the maze's porcelain and grout, and its HUD's
+   red, cyan and gold. The type: Tilt Warp (it tilts with the board), Archivo, and Martian Mono for the HUD bits. */
+
+:root {
+  --void: #000000;
+  --porcelain: #f2f0ea;
+  --grout: #8c95a3;
+  --red: #ff4054;
+  --cyan: #59bfff;
+  --gold: #ffd933;
+
+  --display: 'Tilt Warp Variable', 'Arial Black', system-ui, sans-serif;
+  --body: 'Archivo Variable', system-ui, sans-serif;
+  --mono: 'Martian Mono Variable', ui-monospace, monospace;
+
+  --rx: 0;  /* the board's tilt, as Tilt Warp's rotation axes (degrees), set from script */
+  --ry: 0;
+  --gutter: clamp(16px, 5vw, 72px);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--void); }
+
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--porcelain);
+  font-family: var(--body);
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  font-variation-settings: 'wdth' 104;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 4px; }
+
+h1, h2, h3 { margin: 0; font-weight: 400; }
+p { margin: 0 0 1em; }
+
+.if-touch { display: none; }
+.touch .if-touch { display: revert; }
+.touch .if-mouse { display: none; }
+
+/* ------------------------------------------------------------------ the world, behind everything */
+
+#world {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100lvh;
+  display: block;
+  z-index: 0;
+}
+
+.no-webgl #world { display: none; }
+.no-webgl body {
+  background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), var(--fallback) center / cover no-repeat fixed var(--void);
+}
+
+main, .bar, .foot { position: relative; z-index: 1; }
+
+/* ------------------------------------------------------------------ loader: Slock eating a row of pellets */
+
+.loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: var(--void);
+  transition: opacity 0.6s ease 0.1s, visibility 0s linear 0.7s;
+}
+
+.ready .loader { opacity: 0; visibility: hidden; }
+
+.loader-row {
+  --p: 0;
+  position: relative;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.loader-row i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #6aa2ff;
+  box-shadow: 0 0 0 1px #000, 0 0 12px rgba(64, 140, 255, 0.6);
+}
+
+.loader-row b {
+  position: absolute;
+  left: calc(var(--p) * 214px - 12px);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--red);
+  box-shadow: 0 0 0 1.5px #000;
+  transition: left 0.25s ease-out;
+}
+
+/* ------------------------------------------------------------------ top bar */
+
+.bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 18px var(--gutter);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
+}
+
+.bar-mark {
+  font-family: var(--display);
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--red);
+  text-decoration: none;
+  font-variation-settings: 'XROT' var(--rx), 'YROT' var(--ry);
+}
+
+.bar nav { display: flex; gap: 22px; margin-left: auto; }
+
+.bar nav a, .bar-get {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.bar nav a { color: var(--grout); transition: color 0.2s; }
+.bar nav a:hover { color: var(--porcelain); }
+
+.bar-get {
+  padding: 9px 14px;
+  border-radius: 9px;
+  background: var(--red);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ hero */
+
+.hero {
+  min-height: 100svh;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  padding: 84px var(--gutter) 40px;
+}
+
+.hero-credit {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--grout);
+  margin: 0;
+}
+
+.wordmark {
+  font-family: var(--display);
+  font-size: clamp(5.5rem, 19vw, 22rem);
+  line-height: 0.82;
+  color: var(--red);
+  letter-spacing: -0.01em;
+  margin: 0.06em 0 0 -0.04em;
+  font-variation-settings: 'XROT' var(--rx), 'YROT' var(--ry);
+  pointer-events: none;
+}
+
+.hero-foot {
+  grid-row: 4;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.lede {
+  font-size: clamp(1.15rem, 1.6vw, 1.45rem);
+  line-height: 1.35;
+  max-width: 26ch;
+  margin-bottom: 22px;
+}
+
+.get { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.get-note { margin: 0; font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--grout); }
+
+/* The download button: a red jelly block with the game's black outline. It squishes when pressed. */
+.btn {
+  display: inline-block;
+  padding: 15px 22px 14px;
+  border-radius: 14px;
+  background: var(--red);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.125rem;
+  font-variation-settings: 'wdth' 108;
+  text-decoration: none;
+  box-shadow: 0 0 0 2px #000, inset 0 -5px 0 rgba(0, 0, 0, 0.18), inset 0 2px 0 rgba(255, 255, 255, 0.28);
+  transform-origin: 50% 100%;
+  transition: transform 0.35s cubic-bezier(0.34, 1.8, 0.5, 1), background-color 0.2s;
+}
+
+.btn:hover { transform: scale(1.04, 0.97); background-color: #ff5265; }
+.btn:active { transform: scale(1.1, 0.88); transition-duration: 0.08s; }
+
+.hint { display: flex; align-items: center; gap: 14px; max-width: 20rem; }
+.hint-text { margin: 0; font-family: var(--mono); font-size: 0.75rem; line-height: 1.5; letter-spacing: 0.04em; color: var(--grout); }
+
+.dial { width: 76px; height: 76px; flex: none; overflow: visible; }
+.dial-face { fill: rgba(0, 0, 0, 0.35); stroke: rgba(255, 255, 255, 0.25); stroke-width: 1.5; }
+.dial-cross { stroke: rgba(255, 255, 255, 0.25); stroke-width: 1; }
+.dial-level { fill: none; stroke: rgba(255, 255, 255, 0.6); stroke-width: 1.5; }
+.dial-dot { fill: #fff; }
+.dial.level .dial-dot { fill: #59f28c; }
+
+.tilt-phone {
+  font: inherit;
+  color: var(--porcelain);
+  background: none;
+  border: 1px solid var(--grout);
+  border-radius: 9px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ chapters over the world */
+
+.chapter {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--gutter);
+}
+
+.chapter--tall { display: block; height: 230vh; padding: 0; }
+.chapter--tall .sticky { padding: 0 var(--gutter); }
+
+.sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+}
+
+.copy { position: relative; max-width: 31rem; isolation: isolate; }
+.copy--right { margin-left: auto; }
+
+/* Shade on the words' side of the screen, so they read over the white maze. */
+.scrim-left { background: linear-gradient(90deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.66) 34%, rgba(0, 0, 0, 0) 60%); }
+.scrim-right { background: linear-gradient(270deg, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.66) 34%, rgba(0, 0, 0, 0) 60%); }
+
+.chapter h2, .shelf-head h2, .download h2 {
+  font-family: var(--display);
+  font-size: clamp(2.6rem, 5.4vw, 5rem);
+  line-height: 0.96;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.45em;
+  font-variation-settings: 'XROT' var(--rx), 'YROT' var(--ry);
+}
+
+.aside { color: var(--grout); font-size: 0.95rem; }
+
+.states-row { display: flex; align-items: center; gap: 22px; margin: 0 0 1.2em; }
+.states { list-style: none; margin: 0; padding: 0; }
+
+.states li {
+  position: relative;
+  padding: 0.2em 0 0.2em 1.6em;
+  font-size: clamp(1.2rem, 1.7vw, 1.5rem);
+  line-height: 1.3;
+  opacity: 0.38;
+  transition: opacity 0.3s;
+}
+
+.states li::before {
+  content: '';
+  position: absolute;
+  left: 0.15em;
+  top: 0.62em;
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+
+.states li.on { opacity: 1; }
+.states li.on::before { background: #fff; border-color: #fff; }
+.states li[data-state='stop'].on::before { background: #59f28c; border-color: #59f28c; }
+
+.times { margin: 1.4em 0 0; display: grid; gap: 2px; max-width: 24rem; }
+.times div { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; border-top: 1px solid rgba(140, 149, 163, 0.35); }
+.times dt { display: flex; align-items: center; gap: 10px; }
+.times dt::before { content: ''; width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px #000; }
+.times div:nth-child(1) dt::before { background: #6aa2ff; }
+.times div:nth-child(2) dt::before { background: #ffbf2e; }
+.times div:nth-child(3) dt::before { background: var(--cyan); border-radius: 3px; }
+.times div:nth-child(4) dt::before { background: #2ff2e6; border-radius: 2px; }
+.times dd { margin: 0; font-family: var(--mono); font-size: 0.9375rem; color: var(--gold); }
+
+.power { transition: color 0.4s; }
+.powered .power { color: #9cb6ff; }
+
+/* The powerups: each sits under its model, which the world draws over this spot. */
+.chapter--shelf { display: block; padding-top: 18vh; padding-bottom: 14vh; }
+.shelf-head { max-width: 34rem; margin-bottom: 4vh; }
+.shelf-head p { color: var(--grout); }
+
+.shelf {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 28px clamp(12px, 2vw, 32px);
+}
+
+.shelf li { display: flex; flex-direction: column; }
+/* The model's spot: square, above the name. */
+.shelf li::before { content: ''; display: block; aspect-ratio: 1; margin-bottom: 14px; }
+.shelf h3 { font-family: var(--mono); font-size: 0.8125rem; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 6px; }
+.shelf li p { font-size: 0.9375rem; line-height: 1.45; color: #c9ccd2; margin: 0; }
+.slugs { margin-top: 6vh; max-width: 36rem; color: var(--grout); }
+.slugs strong { color: var(--porcelain); font-weight: 600; }
+
+.chapter--watch {
+  background: radial-gradient(ellipse 70% 60% at 50% 55%, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.92));
+  flex-direction: column; justify-content: center; align-items: stretch; padding-top: 12vh; padding-bottom: 12vh; }
+.chapter--watch h2 { text-align: center; }
+
+.reel { margin: 0 auto; width: min(100%, 1180px); }
+.reel video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px rgba(140, 149, 163, 0.4), 0 30px 80px rgba(0, 0, 0, 0.8);
+}
+.reel figcaption { margin-top: 12px; font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--grout); text-align: center; }
+
+/* ------------------------------------------------------------------ download: the page turns porcelain */
+
+.download {
+  position: relative;
+  z-index: 1;
+  background: var(--porcelain);
+  color: var(--void);
+  padding: 16vh var(--gutter) 14vh;
+}
+
+.download-inner { max-width: 60rem; }
+.download h2 { font-size: clamp(3.2rem, 9vw, 8.5rem); }
+.download .lede { max-width: 32ch; }
+.download .get-note { color: #59606b; }
+.btn--big { font-size: clamp(1.2rem, 1.6vw, 1.45rem); padding: 20px 30px 19px; border-radius: 18px; }
+
+.platforms { display: flex; gap: 18px; list-style: none; margin: 0; padding: 0; font-weight: 600; }
+.get--big .get-note { flex-basis: 100%; margin-top: 6px; }
+.platforms a { text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
+
+.mac-note { margin-top: 26px; max-width: 46ch; color: #59606b; font-size: 0.95rem; }
+
+.download h3 {
+  margin: 9vh 0 14px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #59606b;
+}
+
+.controls { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 14px 28px; }
+.controls div { display: flex; align-items: center; gap: 14px; }
+.controls dd { margin: 0; }
+
+kbd {
+  display: inline-block;
+  min-width: 2.4em;
+  padding: 5px 10px 4px;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 0 0 1.5px #000, inset 0 -3px 0 #d8d5cc;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.gamepad { margin-top: 18px; color: #59606b; font-size: 0.95rem; }
+
+/* ------------------------------------------------------------------ footer */
+
+.foot {
+  background: var(--void);
+  padding: 56px var(--gutter) 64px;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  color: var(--grout);
+}
+
+.foot ul { list-style: none; display: flex; flex-wrap: wrap; gap: 10px 26px; margin: 0 0 18px; padding: 0; }
+.foot a { color: var(--porcelain); text-underline-offset: 3px; }
+
+/* ------------------------------------------------------------------ words arriving */
+
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.reveal.in { opacity: 1; transform: none; }
+
+/* ------------------------------------------------------------------ small screens */
+
+@media (max-width: 860px) {
+  .bar nav { display: none; }
+  /* Shade at the top and bottom of the opening screen, where the words sit over the maze. */
+  .hero { position: relative; isolation: isolate; }
+  .hero::before, .hero::after { content: ''; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none; }
+  .hero::before { top: 0; height: 45%; background: linear-gradient(rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0)); }
+  .hero::after { bottom: 0; height: 55%; background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.9) 45%); }
+  .states-row .dial { width: 64px; height: 64px; }
+  .bar-get { margin-left: auto; }
+  .hero { padding-top: 76px; }
+  .wordmark { font-size: 27vw; }
+  .hero-foot { flex-direction: column; align-items: flex-start; }
+  .hint { display: none; }
+  .touch .hint { display: flex; }
+  .chapter { align-items: flex-end; padding-bottom: 8vh; }
+  .sticky { align-items: flex-end; padding-bottom: 8vh; }
+  .copy, .copy--right { max-width: none; margin-left: 0; }
+  .scrim-left, .scrim-right { background: linear-gradient(0deg, rgba(0, 0, 0, 0.94), rgba(0, 0, 0, 0.78) 55%, rgba(0, 0, 0, 0) 92%); }
+  .shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chapter--shelf { padding-top: 12vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .btn, .states li, .loader { transition: none; }
+}

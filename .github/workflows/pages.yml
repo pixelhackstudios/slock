@@ -1,12 +1,11 @@
-# Builds slock-web/ and publishes it to GitHub Pages (https://pixelhackstudios.github.io/slock/).
+# Builds website/ and publishes it to GitHub Pages (https://pixelhackstudios.github.io/slock/).
 name: Website
 
 on:
   push:
     branches: [main]
     paths:
-      - 'slock-web/**'
-      - 'docs/screenshots/**'
+      - 'website/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -24,20 +23,20 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: slock-web
+        working-directory: website
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: slock-web/package-lock.json
+          cache-dependency-path: website/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run build
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: slock-web/dist
+          path: website/dist
 
   deploy:
     needs: build
