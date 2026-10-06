@@ -12,23 +12,23 @@ const SHRINK_SPEED := 3.0         # block sizes per second, shrinking through a 
 const MAX_SPEED := 60.0           # safety limit only, well above what gravity reaches
 
 # On a flat floor the tilt sets the speed and Slock eases to it: a gentle tilt is a steady creep, full tilt full speed,
-# the same every time. (A tilt that set an acceleration left no middle speed: a crawl, or faster and faster.)
+# the same every time. (A tilt that set an acceleration left no middle speed: a crawl, or faster and faster.) It's the
+# whole tilt, whichever way it points, so sweeping round a turn keeps the speed and pulling in slows it, all the way
+# through the turn; the direction only picks the corridor (see TURN_MARGIN).
 const TOP_SPEED := 15.0           # blocks/s at full tilt (more in later sections: it ramps up with gravity)
 const ACCEL := 40.0               # blocks/s^2 at most, speeding up ...
 const ACCEL_EASE := 5.0           # ... easing into the speed the tilt asks for (per second)
 const BRAKE := 175.0              # blocks/s^2 at most, slowing to a lower speed ...
 const BRAKE_EASE := 10.0          # ... easing into it
-const COAST := 4.0                # blocks/s^2: slowing while you lean to the side for a turn
 # Level the board and it stops on a tile centre: the first one ahead it can stop on braking no harder than
 # STOP_BRAKE, or the last one before a hole or a wall if that comes first. From near rest it settles onto the nearest.
 const LEVEL := 0.02               # tilt (fraction of full) under which the board counts as level
 const STOP_BRAKE := 175.0         # blocks/s^2
 const SETTLE_SPEED := 3.0         # blocks/s
 # Turning: a lean to the side is remembered for a moment, and Slock takes the next opening that way (or one it has
-# only just passed), keeping most of its speed round the corner.
+# only just passed, but never the junction it has just turned at), keeping its speed round the corner.
 const TURN_MEMORY := 0.3          # seconds
 const TURN_LATE := 0.5            # blocks past an opening it can still turn back into it
-const CORNER_CARRY := 0.9         # how much of its speed it keeps round a corner
 
 # On ramps, and for a moment after a swurm knocks it away, plain physics moves it instead: tilted gravity, floor
 # friction, and these.
@@ -43,7 +43,14 @@ const LEVEL_GRIP := 8.0           # per second
 
 const HOLE_SNAP := 14.0           # how fast it lines up with a hole it's dropping into
 const TURN_SNAP := 14.0           # how fast it slides to a tile centre to take a turn
-const TURN_BIAS := 1.15           # tilt must favour the other axis by this much to turn (no jitter on diagonals)
+# Which way the hand points is judged on screen, where the player steers: it leans into the crossing corridor once
+# that's nearer to it (as the camera shows them) than the corridor it's on, by this many degrees (no jitter on
+# diagonals).
+const TURN_MARGIN := 8.0
+# Near the middle the hand's direction is mostly noise (like a thumbstick's), so inside this much of the trackball's
+# radius (before the response curve) it asks for no new turn; the tilt still sets the speed, and a turn already
+# asked for still happens.
+const TURN_DEAD_ZONE := 0.3
 
 const LAUNCH_DURATION := 0.55     # seconds in the air on a ramp launch
 const GUIDE_BRAKE := 20.0         # blocks/s^2: how hard a ramp guide settles it toward its stop point
@@ -54,6 +61,7 @@ var grid := 1.0                   # block size of the grid it's locked to
 var grid_z := 0.0                 # the z of one of that grid's tile-centre rows
 var travel_z := true              # rail it's on: true = runs along Z (X locked), false = runs along X (Z locked)
 var grounded := false
+var rig: TiltRig                  # the camera: where corridors point on screen (see TURN_MARGIN)
 var governed := false             # on a flat floor, going at the speed the tilt asks for (see TOP_SPEED)
 var boost := Vector3.ZERO         # set by the ramp booster each physics frame: extra acceleration uphill
 var boost_limit := 0.0            # ... until it's going this fast uphill
@@ -73,6 +81,7 @@ var _saved_layers := Vector2i.ZERO
 var _clock := 0.0                 # physics time, seconds
 var _turn := Vector3.ZERO         # a lean to the side, remembered: the way to turn at the next opening ...
 var _turn_until := 0.0            # ... until then (see TURN_MEMORY)
+var _turned_at := Vector2.INF     # the tile centre (x, z) of the last turn, until it has left it
 var _knocked_until := 0.0
 
 
@@ -179,6 +188,7 @@ func reset_to(pos: Vector3) -> void:
 		_end_launch()
 	_guiding = false
 	_turn = Vector3.ZERO
+	_turned_at = Vector2.INF
 	travel_z = true
 	_set_rail_lock(false, false)
 	PhysicsServer3D.body_set_state(get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, Transform3D(Basis(), pos))
@@ -247,19 +257,18 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	governed = normal.y > 0.9999 and not boosting and _clock >= _knocked_until
 
 	# Rails: the centre is locked to the tile-centre line across the corridor. It turns Pac-Man style, at a tile
-	# centre: when the tilt favours the other axis (or did a moment ago, see TURN_MEMORY) and that way is open.
-	var want_z := travel_z
-	if absf(g.z) > absf(g.x) * TURN_BIAS:
-		want_z = true
-	elif absf(g.x) > absf(g.z) * TURN_BIAS:
-		want_z = false
-	var leaning := want_z != travel_z
-	if leaning:
-		_turn = Vector3(0, 0, signf(g.z)) if want_z else Vector3(signf(g.x), 0, 0)
+	# centre: when the hand points into the crossing corridor (or did a moment ago, see TURN_MEMORY) and that way is
+	# open.
+	var turn := _leaning_to(g)
+	var leaning := turn != Vector3.ZERO
+	if leaning and (rig == null or rig.hand().length() >= TURN_DEAD_ZONE):
+		_turn = turn
 		_turn_until = _clock + TURN_MEMORY
 	elif _clock > _turn_until:
 		_turn = Vector3.ZERO
 
+	if Vector2(p.x, p.z).distance_to(_turned_at) > grid:
+		_turned_at = Vector2.INF
 	var pulling := false
 	if _turn != Vector3.ZERO:
 		var along := p.z if travel_z else p.x
@@ -280,14 +289,20 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			var dir := signf(speed)
 			var ahead := nearest if (nearest - along) * dir >= 0.0 else nearest + dir * grid
 			var behind := ahead - dir * grid
-			if (along - behind) * dir <= TURN_LATE * grid and _opens(space, p, behind, _turn):
+			# One turn per junction: the one it just turned at can't turn it again, so a flick to the side and back
+			# turns there and then at the next opening, rather than undoing the turn.
+			var behind_at := Vector2(p.x, behind) if travel_z else Vector2(behind, p.z)
+			var turned_there := behind_at.distance_to(_turned_at) < 0.01 * grid
+			if not turned_there and (along - behind) * dir <= TURN_LATE * grid and _opens(space, p, behind, _turn):
 				at = behind
 			elif (ahead - along) * dir <= absf(speed) * dt and _opens(space, p, ahead, _turn):
 				at = ahead
 		if not is_nan(at):
-			# Round the corner: on a flat floor it keeps most of its speed; on plain physics momentum stops there.
-			var carry := absf(speed) * CORNER_CARRY if governed else 0.0
+			# Round the corner: on a flat floor it keeps its speed (the tilt sets it from here); on plain physics
+			# momentum stops there.
+			var carry := absf(speed) if governed else 0.0
 			p = Vector3(p.x, p.y, at) if travel_z else Vector3(at, p.y, p.z)
+			_turned_at = Vector2(p.x, p.z)
 			travel_z = _turn.z != 0.0
 			v = Vector3(0, v.y, _turn.z * carry) if travel_z else Vector3(_turn.x * carry, v.y, 0)
 			_turn = Vector3.ZERO
@@ -343,15 +358,14 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	state.linear_velocity = Vector3(flat.x, v.y, flat.z)
 
 
-## The speed along the rail for the next step on a flat floor. `pull`: the tilt along the rail (-1..1 of full tilt);
-## `tilt`: the whole board's (0..1); `leaning`: towards the other axis, for a turn.
+## The speed along the rail for the next step on a flat floor: the whole board's `tilt` (0..1) sets how fast, `pull`
+## (the tilt along the rail) which way, or the way it's already going while `leaning` into a turn.
 func _govern(space: PhysicsDirectSpaceState3D, p: Vector3, speed: float, pull: float, tilt: float, leaning: bool,
 		unit: float, dt: float) -> float:
 	if tilt < LEVEL:
 		return _stop_on_centre(space, p, speed, unit, dt)
-	if leaning:
-		return move_toward(speed, 0.0, COAST * unit * dt)
-	var target := TOP_SPEED * unit * clampf(pull, -1.0, 1.0)
+	var way := signf(speed) if leaning else signf(pull)
+	var target := TOP_SPEED * unit * tilt * way
 	var faster := absf(target) > absf(speed) and target * speed >= 0.0
 	var most := (ACCEL if faster else BRAKE) * unit
 	return speed + clampf((target - speed) * (ACCEL_EASE if faster else BRAKE_EASE), -most, most) * dt
@@ -385,6 +399,27 @@ func _stop_on_centre(space: PhysicsDirectSpaceState3D, p: Vector3, speed: float,
 	if d < 1e-4:
 		return 0.0
 	return dir * maxf(0.0, absf(speed) - speed * speed / (2.0 * d) * dt)
+
+
+## The way across the rail the hand leans, or zero: judged on screen (see TURN_MARGIN), the crossing corridor nearer
+## to the hand's direction than either way along the rail, by the margin. The hand as it is now (TiltRig.hand), not
+## the tilt `g`, which is a frame behind and filtered; `g` only stands in when there's no camera.
+func _leaning_to(g: Vector3) -> Vector3:
+	var hand := rig.hand() if rig else _screen(Vector3(g.x, 0, g.z))
+	if hand.length_squared() < 1e-10:
+		return Vector3.ZERO
+	var along := Vector3.BACK if travel_z else Vector3.RIGHT
+	var across := Vector3.RIGHT if travel_z else Vector3.BACK
+	var to_along := minf(absf(hand.angle_to(_screen(along))), absf(hand.angle_to(_screen(-along))))
+	var side := across if absf(hand.angle_to(_screen(across))) < absf(hand.angle_to(_screen(-across))) else -across
+	if absf(hand.angle_to(_screen(side))) + deg_to_rad(TURN_MARGIN) < to_along:
+		return side
+	return Vector3.ZERO
+
+
+## A flat world direction on screen (see TiltRig.on_screen); straight down from above if there's no camera.
+func _screen(w: Vector3) -> Vector2:
+	return rig.on_screen(w) if rig else Vector2(w.x, -w.z)
 
 
 ## Whether the way `dir` is open from the tile centre at `along` on the current rail.

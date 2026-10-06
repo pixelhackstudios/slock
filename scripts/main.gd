@@ -102,6 +102,7 @@ func _ready() -> void:
 	slock = _game(Slock.new())
 	rig = TiltRig.new()
 	rig.target = slock
+	slock.rig = rig
 	_game(rig)
 
 	var level := LevelIndicator.new()

@@ -14,8 +14,7 @@ const PICKUP_VOLUME := 0.5        # power pellets and powerups: steel woo, big p
 const SLUG_VOLUME := 0.2          # slug pickups: the single slug and the three-slug pack
 const BIG_POP_DETUNE := 1.0       # semitones of random pitch wobble on the big pop
 const MUSIC_VOLUME := 0.7        # the music, under everything
-const MUSIC_DELAY := 3.0          # seconds after the first run starts before the music comes in ...
-const MUSIC_FADE := 4.0           # ... fading up over this long
+const MUSIC_FADE := 2.0           # seconds the music takes to fade up when the first run starts
 const MUSIC_DIR := "res://sounds/theme-music/"
 
 var _pellets: Array[AudioStream] = []
@@ -63,13 +62,12 @@ func _ready() -> void:
 	add_child(_music)
 
 
-## The music, once the first run starts (the title screen is quiet): after MUSIC_DELAY seconds main-theme.ogg fades
-## in, then the theme-0xx songs follow (see _next_song). Later runs leave it playing.
+## The music, once the first run starts (the title screen is quiet): main-theme.ogg fades in at once, then the
+## theme-0xx songs follow (see _next_song). Later runs leave it playing.
 func start_music() -> void:
 	if _music_started:
 		return
 	_music_started = true
-	await get_tree().create_timer(MUSIC_DELAY, true).timeout
 	_play(_music, load(MUSIC_DIR + "main-theme.ogg"), MUSIC_VOLUME, 1.0)
 	_music.volume_db = -60.0
 	create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).tween_property(_music, "volume_db",

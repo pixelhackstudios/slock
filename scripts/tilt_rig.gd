@@ -9,8 +9,8 @@ extends Camera3D
 const MAX_TILT := 25.0            # degrees of world/camera tilt at full input
 const FALL_GRAVITY := 75.0        # strength of the tilted gravity
 # Jitter filter, like a surgical robot's tremor filter: it only smooths frame-to-frame mouse jitter, so the
-# board follows the hand with no lag you can feel (time constant in seconds; about a 6 Hz cutoff).
-const JITTER_FILTER := 0.025
+# board follows the hand with no lag you can feel (time constant in seconds; about a 16 Hz cutoff).
+const JITTER_FILTER := 0.010
 const TRACKBALL_PIXELS := 320.0   # mouse travel (px) from level to full tilt
 
 var target: Node3D
@@ -76,15 +76,21 @@ func _process(delta: float) -> void:
 
 
 func _read_input() -> Vector2:
-	if not input_enabled:
-		stick = Vector2.ZERO
-		return stick
-	stick = _trackball
-	var pad := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
-	if pad.length_squared() > 0.0004:
-		stick = pad.limit_length(1.0)
+	stick = hand()
 	var mag := stick.length()
 	return stick.normalized() * pow(mag, 2.2) if mag > 0.0 else Vector2.ZERO
+
+
+## Where the hand is right now (-1..1, x = screen right, y = screen up): the trackball, or the left stick when it's
+## pushed. Raw, before the response curve and the jitter filter. Slock reads this in its physics step to choose turns,
+## so the choice doesn't wait a frame for the tilt (input comes in before the physics steps, the tilt after them).
+func hand() -> Vector2:
+	if not input_enabled:
+		return Vector2.ZERO
+	var pad := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
+	if pad.length_squared() > 0.0004:
+		return pad.limit_length(1.0)
+	return _trackball
 
 
 ## The camera's untilted orientation: looking down at `pitch`, turned by `yaw` (to the right).
@@ -105,6 +111,14 @@ func gravity_dir() -> Vector3:
 	var foreshorten := maxf(0.2, sin(deg_to_rad(pitch)))
 	var dir := (right * tilt.x + fwd * (tilt.y / foreshorten)).normalized()
 	return (Vector3.DOWN + dir * tan(mag * deg_to_rad(MAX_TILT))).normalized()
+
+
+## Where a flat world direction points on screen, the way the tilt aims (x right, y up): the inverse of
+## gravity_dir's mapping, so a tilt pointing straight down an on-screen corridor points along it here too.
+func on_screen(w: Vector3) -> Vector2:
+	var rot := _base_rot()
+	var foreshorten := maxf(0.2, sin(deg_to_rad(pitch)))
+	return Vector2(w.dot(_flat(rot.x)), w.dot(_flat(-rot.z)) * foreshorten)
 
 
 static func _flat(v: Vector3) -> Vector3:

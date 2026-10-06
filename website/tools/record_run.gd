@@ -132,9 +132,4 @@ class Pilot extends Node:
 	## A grid step (columns right, rows up the course) as a hand on the board: the inverse of TiltRig.gravity_dir.
 	func _toward(d: Vector2i) -> Vector2:
 		var rig: TiltRig = main.rig
-		var world := Vector3(d.x, 0, -d.y)
-		var rot := rig._base_rot()
-		var right := TiltRig._flat(rot.x)
-		var fwd := TiltRig._flat(-rot.z)
-		var foreshorten := maxf(0.2, sin(deg_to_rad(rig.pitch)))
-		return Vector2(world.dot(right), world.dot(fwd) * foreshorten).normalized()
+		return rig.on_screen(Vector3(d.x, 0, -d.y)).normalized()
