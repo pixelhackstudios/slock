@@ -1,3 +1,4 @@
+class_name Main
 extends Node3D
 ## A run of Slock: an endless climb through sections (section.gd), each a little higher, with smaller blocks
 ## and faster than the last. Built in code: lighting, the sections, Slock, the swurms, the tilt camera and the
@@ -12,9 +13,12 @@ extends Node3D
 ## back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent ones carry
 ## over, pickups add to it, and each gate adds a growing allowance on top. Powerups float in each section and come back 10 s after being taken.
 ## Mouse (or left stick) tilts the board. Esc pauses, R restarts, Q quits (from the title or pause screens).
-## Runs start from the title screen; a good score goes on the local leaderboard (leaderboard.gd).
+## Runs start from the title screen; a good score goes on the local leaderboard (leaderboard.gd). The welcome screen
+## (how to play) shows the first time the game runs, and from the title screen with H.
 
-enum State { TITLE, PLAYING, PAUSED, OVER }
+enum State { TITLE, PLAYING, PAUSED, OVER, WELCOME }
+
+const WELCOME_SEEN := "user://welcome_seen" # there once the welcome screen has been shown
 
 const START_TIME := 35.0
 const PELLET_TIME := 1.0          # seconds each pellet adds
@@ -119,6 +123,9 @@ func _ready() -> void:
 	add_child(_aim_mark)
 
 	_start_run(false)
+	if not FileAccess.file_exists(WELCOME_SEEN):
+		_show_welcome()
+		FileAccess.open(WELCOME_SEEN, FileAccess.WRITE)
 
 
 ## Adds a node that stops while the game is paused.
@@ -177,6 +184,12 @@ func _start_run(play := true) -> void:
 		hud.show_title()
 
 
+## How to play, over the waiting course (from the title screen).
+func _show_welcome() -> void:
+	state = State.WELCOME
+	hud.show_welcome()
+
+
 ## The run starts: the clock goes and the board is yours.
 func _begin() -> void:
 	state = State.PLAYING
@@ -224,15 +237,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		if state == State.TITLE:
 			if key.keycode == KEY_SPACE:
 				_begin()
+			elif key.keycode == KEY_H:
+				_show_welcome()
 			elif key.keycode == KEY_Q:
 				get_tree().quit()
+		elif state == State.WELCOME:
+			if key.keycode == KEY_SPACE:
+				_begin()
+			elif key.keycode == KEY_ESCAPE:
+				state = State.TITLE
+				hud.show_title()
 		elif key.keycode == KEY_Q and state == State.PAUSED:
 			get_tree().quit()
 		elif key.keycode == KEY_R or (state == State.OVER and key.keycode in [KEY_ENTER, KEY_KP_ENTER]):
 			_start_run() # (while the name box is up, it takes the keys itself)
 		elif key.keycode == KEY_ESCAPE and state != State.OVER and not aiming:
 			_set_paused(state == State.PLAYING)
-	elif event is InputEventMouseButton and event.pressed and state == State.TITLE:
+	elif event is InputEventMouseButton and event.pressed and state in [State.TITLE, State.WELCOME]:
 		_begin()
 	elif event is InputEventMouseButton and event.pressed and state == State.PLAYING:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
@@ -624,6 +645,18 @@ func _swurm_hit(swurm: Swurm, p: Vector3) -> void:
 
 
 func _setup_lighting() -> void:
+	var world_env := WorldEnvironment.new()
+	world_env.environment = environment()
+	add_child(world_env)
+	var sun := sunlight()
+	sun.shadow_enabled = true
+	sun.shadow_opacity = 0.75
+	add_child(sun)
+
+
+## The game's environment: a black background, a grey fill and grey reflections (also lights the welcome screen's
+## models, see hud.gd).
+static func environment() -> Environment:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color.BLACK
@@ -640,13 +673,12 @@ func _setup_lighting() -> void:
 	env.sky = Sky.new()
 	env.sky.sky_material = grey
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	var world_env := WorldEnvironment.new()
-	world_env.environment = env
-	add_child(world_env)
+	return env
 
+
+## The game's sun (without its shadow).
+static func sunlight() -> DirectionalLight3D:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-58, 35, 0)
 	sun.light_energy = 1.3
-	sun.shadow_enabled = true
-	sun.shadow_opacity = 0.75
-	add_child(sun)
+	return sun

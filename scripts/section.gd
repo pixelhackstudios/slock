@@ -948,14 +948,16 @@ var _pickups := {}                # clocks, keys and powerups: Vector2i(col, row
 var _floats := {}                 # ... and how it floats: [home, phase]
 
 
-## The orbs (pellets, gold pellets, power pellets) are drawn in batches, one per look: thousands of them in the
-## later sections. They bob on the GPU (orb.gdshader). Clocks and keys are a few separate nodes.
+const ORB_LOOKS := { # Eaten -> [radius, float height, bob height, colour, glow]
+	Eaten.PELLET: [PELLET_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2)],
+	Eaten.GOLD: [GOLD_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(1.0, 0.75, 0.1, 0.72), Color(1.3, 0.8, 0.1)],
+	Eaten.POWER: [POWER_RADIUS, PICKUP_HEIGHT, PICKUP_BOB, Color(1.0, 0.85, 0.15, 0.72), Color(1.2, 0.85, 0.1)],
+}
+
+## The orbs (pellets, gold pellets, power pellets) are drawn in batches, one per look (ORB_LOOKS): thousands of them
+## in the later sections. They bob on the GPU (orb.gdshader). Clocks and keys are a few separate nodes.
 func _spawn_pellets() -> void:
-	var looks := { # Eaten -> [radius, float height, bob height, colour, glow]
-		Eaten.PELLET: [PELLET_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(0.25, 0.55, 1.0, 0.72), Color(0.1, 0.35, 1.2)],
-		Eaten.GOLD: [GOLD_RADIUS, PELLET_HEIGHT, PELLET_BOB, Color(1.0, 0.75, 0.1, 0.72), Color(1.3, 0.8, 0.1)],
-		Eaten.POWER: [POWER_RADIUS, PICKUP_HEIGHT, PICKUP_BOB, Color(1.0, 0.85, 0.15, 0.72), Color(1.2, 0.85, 0.1)],
-	}
+	var looks := ORB_LOOKS
 	var kind_of := {".": Eaten.PELLET, ",": Eaten.GOLD, "O": Eaten.POWER, "o": Eaten.POWER, "C": Eaten.CLOCK, "K": Eaten.KEY,
 		"*": Eaten.STEEL} # the kind of powerup is picked as it appears
 	var spots := {} # Eaten -> [Vector2i]
