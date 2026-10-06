@@ -2,15 +2,11 @@ class_name TiltRig
 extends Camera3D
 ## "Tilting the world": mouse input picks a tilt. A single tilted gravity vector drives the physics and the
 ## camera presents that exact same rotation, so apparent downhill and simulated downhill cannot diverge.
-## Mouse movement accumulates into a persistent 2D trackball (it stays where you leave it), a precision
-## response shapes its magnitude (magnitude^2.2: very fine near level, full tilt at full displacement), and
-## that commands the tilt. The left stick, when pushed, replaces the trackball.
+## Mouse movement accumulates into a persistent 2D trackball (it stays where you leave it), and that is the tilt,
+## straight: halfway out is half tilt. The left stick, when pushed, replaces the trackball.
 
 const MAX_TILT := 25.0            # degrees of world/camera tilt at full input
 const FALL_GRAVITY := 75.0        # strength of the tilted gravity
-# Jitter filter, like a surgical robot's tremor filter: it only smooths frame-to-frame mouse jitter, so the
-# board follows the hand with no lag you can feel (time constant in seconds; about a 16 Hz cutoff).
-const JITTER_FILTER := 0.010
 const TRACKBALL_PIXELS := 320.0   # mouse travel (px) from level to full tilt
 
 var target: Node3D
@@ -58,8 +54,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	var want := _read_input()
-	tilt = tilt.lerp(want, 1.0 - exp(-delta / JITTER_FILTER))
+	stick = hand()
+	tilt = stick
 	# One world, one downhill direction: the force field and the visible tilt are the same rotation.
 	var space := get_world_3d().space
 	PhysicsServer3D.area_set_param(space, PhysicsServer3D.AREA_PARAM_GRAVITY_VECTOR, gravity_dir())
@@ -75,15 +71,8 @@ func _process(delta: float) -> void:
 	global_transform = Transform3D(rot, _pivot + rot * Vector3(0, 0, distance * _zoom_now))
 
 
-func _read_input() -> Vector2:
-	stick = hand()
-	var mag := stick.length()
-	return stick.normalized() * pow(mag, 2.2) if mag > 0.0 else Vector2.ZERO
-
-
 ## Where the hand is right now (-1..1, x = screen right, y = screen up): the trackball, or the left stick when it's
-## pushed. Raw, before the response curve and the jitter filter. Slock reads this in its physics step to choose turns,
-## so the choice doesn't wait a frame for the tilt (input comes in before the physics steps, the tilt after them).
+## pushed.
 func hand() -> Vector2:
 	if not input_enabled:
 		return Vector2.ZERO

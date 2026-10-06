@@ -106,7 +106,6 @@ func _ready() -> void:
 	slock = _game(Slock.new())
 	rig = TiltRig.new()
 	rig.target = slock
-	slock.rig = rig
 	_game(rig)
 
 	var level := LevelIndicator.new()
@@ -440,7 +439,7 @@ func _side_ramp(here: Section, p: Vector3) -> void:
 	var uphill := slock.linear_velocity.dot(up)
 	if uphill > 0.3:
 		if p.x * up.x >= here.side_top_x() * up.x:
-			if not slock.governed: # coming up the ramp, not settling back onto the tile at its top
+			if not slock.on_flat: # coming up the ramp, not settling back onto the tile at its top
 				slock.launch(here.side_landing(), here.tile)
 		else:
 			slock.boost = up * BOOST_ACCEL

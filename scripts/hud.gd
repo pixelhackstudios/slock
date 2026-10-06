@@ -211,7 +211,7 @@ func show_welcome() -> void:
 static func _welcome_parts() -> Array:
 	return [
 		["THE GOAL", "climb forever", [
-			["slock", "TILT THE BOARD", "Move the mouse to slide Slock. Level the board and it stops on a tile."],
+			["slock", "TILT THE BOARD", "Move the mouse to tilt the board, and Slock slides downhill."],
 			["gate", "OPEN THE GATE", "Eat every blue pellet to open it. Go through to climb to the next floor."],
 			["key", "OR FIND THE KEY", "It's in the side room, and opens the gate, pellets or not."]]],
 		["TIME", "you start with %d seconds; when they run out, the run is over" % Main.START_TIME, [
