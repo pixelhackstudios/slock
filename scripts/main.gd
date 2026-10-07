@@ -12,7 +12,8 @@ extends Node3D
 ## Slugs: left click to aim (the game freezes; tilt picks a direction), left click again to fire, right click to
 ## back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent ones carry
 ## over, pickups add to it, and each gate adds a growing allowance on top. Powerups float in each section and come back 10 s after being taken.
-## Mouse (or left stick) tilts the board. Esc pauses, R restarts, Q quits (from the title or pause screens).
+## Mouse (or left stick) tilts the board; lanes on the floor show Slock's row and column out to the walls. Esc
+## pauses, R restarts, Q quits (from the title or pause screens).
 ## Runs start from the title screen; a good score goes on the local leaderboard (leaderboard.gd). The welcome screen
 ## (how to play) shows the first time the game runs, and from the title screen with H.
 
@@ -53,6 +54,8 @@ const STEEL_DURATION := 10.0      # Slock of Steel: break inner walls and swurms
 const STEEL_WALL_POINTS := 20
 const CLEAR_DOTS_FRACTION := 0.25 # clear-the-dots removes this much of what's left
 
+const LANE_COLOR := Color(1.0, 0.0, 0.0, 0.15) # the lanes along Slock's row and column (alpha: how see-through)
+
 const BOOST_ACCEL := 80.0         # the climb ramp's booster pushes this hard uphill ...
 const BOOST_SPEED := 15.0         # ... up to this speed, then launches Slock off the top
 
@@ -84,6 +87,7 @@ var _flying: Array[Slug] = []
 var aiming := false               # slug aim mode: the game is frozen, tilt picks the direction, click fires
 var _aim := Vector2i(0, 1)        # the direction picked (on the grid: +y is up the course)
 var _aim_mark: MeshInstance3D     # translucent red block over what the slug would hit
+var _lanes: Array[MeshInstance3D] = [] # lanes along Slock's row and column (see _show_lanes)
 var _steel_until := 0.0
 var _run_started := 0             # msec, so the click that starts a run doesn't fire a slug
 var _end_reason := ""             # the game-over screen, kept to redraw it after the name is entered
@@ -120,6 +124,18 @@ func _ready() -> void:
 	_aim_mark.mesh.material = Section._glass(Color(1.0, 0.08, 0.08, 0.45), Color(0.7, 0.0, 0.0), 0.2)
 	_aim_mark.visible = false
 	add_child(_aim_mark)
+	var lane_look := StandardMaterial3D.new()
+	lane_look.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lane_look.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	lane_look.albedo_color = LANE_COLOR
+	for i in 4:
+		var lane := MeshInstance3D.new()
+		lane.mesh = BoxMesh.new() # a unit box, scaled to each lane
+		lane.material_override = lane_look
+		lane.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		lane.visible = false
+		add_child(lane)
+		_lanes.append(lane)
 
 	_start_run(false)
 	if not FileAccess.file_exists(WELCOME_SEEN):
@@ -305,6 +321,7 @@ func _process(delta: float) -> void:
 	if aiming:
 		_update_aim()
 		hud.show_slugs(slugs, true)
+		_show_lanes(sections[current])
 		return
 	now += delta
 	var mood := Swurm.Mood.NORMAL
@@ -328,6 +345,35 @@ func _process(delta: float) -> void:
 	hud.show_slugs(slugs, false)
 	hud.show_lives(lives)
 	hud.show_steel(maxf(0.0, _steel_until - now))
+	_show_lanes(here)
+
+
+## Lanes along the row and column Slock is on, from the tiles next to it out to the first wall, pit or shut gate
+## each way: where it can go from here. Not under Slock itself (it's see-through).
+func _show_lanes(here: Section) -> void:
+	var at := here.tile_under(slock.global_position)
+	var show := state == State.PLAYING and slock.on_flat and here.tile_at(at.x, at.y) == Section.FLOOR
+	var ways: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for i in ways.size():
+		var d := ways[i]
+		var n := 0
+		while show and n < 200 and _lane_goes(here, at, at + d * (n + 1)):
+			n += 1
+		var lane := _lanes[i]
+		lane.visible = show and n > 0
+		if not lane.visible:
+			continue
+		var along := n * here.tile
+		lane.scale = Vector3(along if d.x != 0 else here.tile, 0.02 * here.tile, along if d.y != 0 else here.tile)
+		var middle := (here.tile_centre(at + d) + here.tile_centre(at + d * n)) * 0.5
+		lane.global_position = middle + Vector3.UP * 0.01 * here.tile
+
+
+## Whether a lane from `from` carries on onto tile `t`: floor, on the same level, and not a shut gate.
+func _lane_goes(here: Section, from: Vector2i, t: Vector2i) -> bool:
+	if here.tile_at(t.x, t.y) != Section.FLOOR or here.levels[t.x][t.y] != here.levels[from.x][from.y]:
+		return false
+	return t != here.exit_tile() or here.gate_open()
 
 
 func _physics_process(delta: float) -> void:

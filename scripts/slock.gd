@@ -1,8 +1,10 @@
 class_name Slock
 extends RigidBody3D
-## The sliding block: plain physics. The board's tilted gravity pushes it, floor friction is the only drag (walls have
-## none), and walls stop it. A ramp booster can push it uphill and launch it in a hop. It's always one block across,
-## shrinking smoothly when it passes into a section with smaller blocks. Its look and wobble are in jelly.gd.
+## The sliding block: physics, lined up with the tiles. The board's tilted gravity pushes it, floor friction is the
+## only drag (walls have none), and walls stop it. In a corridor its centre stays on the corridor's centre line, and
+## pushed towards an opening it lines up with it so it fits (tile alignment, in _integrate_forces). A ramp booster can
+## push it uphill and launch it in a hop. It's always one block across, shrinking smoothly when it passes into a
+## section with smaller blocks. Its look and wobble are in jelly.gd.
 
 const HEIGHT_RATIO := 1.1         # a hair taller than the walls (which are one block tall)
 const SHRINK := 0.1               # hull undersize vs a tile: stops wedging, stays grid-true
@@ -11,13 +13,16 @@ const MAX_SPEED := 60.0           # safety limit only, well above what gravity r
 
 const FRICTION := 0.058           # floor friction coefficient (0 = ice)
 const HOLE_SNAP := 14.0           # how fast it lines up with a hole it's dropping into
+const ALIGN_REACH := 0.1          # tiles: this close to the centre, lining up for an opening snaps it there ...
+const ALIGN_SLOW := 2.0           # ... and below this speed (tiles/s) that way, it's drawn there ...
+const ALIGN_PULL := 14.0          # ... this fast (per second)
 
 const LAUNCH_DURATION := 0.55     # seconds in the air on a ramp launch
 const GUIDE_BRAKE := 20.0         # blocks/s^2: how hard a ramp guide settles it toward its stop point
 
 var size := 1.0                   # one grid block across
 var height := HEIGHT_RATIO
-var grid := 1.0                   # block size of the grid it's locked to
+var grid := 1.0                   # block size of the grid it lines up with
 var grid_z := 0.0                 # the z of one of that grid's tile-centre rows
 var grounded := false
 var on_flat := false              # on a flat floor (not a ramp)
@@ -195,6 +200,39 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 
 	var normal: Vector3 = below.normal
 	on_flat = normal.y > 0.9999 and not boosting
+
+	# Tile alignment: in a corridor (walls on both sides of the tile it's on), its centre is held on the tile's centre
+	# line across the corridor. Pushed mostly towards an open side, it lines up with the tile across that way, so it
+	# fits the opening: snapped when it's at the centre (or reaches it this step), drawn to it when it's barely moving
+	# that way.
+	if on_flat:
+		var centre := Vector3(_snap(p.x), p.y, _snap_z(p.z))
+		var push := Vector2(g.x, g.z)
+		if push.length_squared() > 1e-6:
+			var sideways := absf(push.x) > absf(push.y) # pushed mostly along x: line up in z
+			var way := Vector3(signf(push.x), 0, 0) if sideways else Vector3(0, 0, signf(push.y))
+			if not _ray(space, centre, way, grid * 0.7):
+				var off := centre.z - p.z if sideways else centre.x - p.x
+				var speed := v.z if sideways else v.x
+				if absf(off) <= maxf(ALIGN_REACH * grid, absf(speed) * dt):
+					if sideways:
+						p.z = centre.z
+						v.z = 0.0
+					else:
+						p.x = centre.x
+						v.x = 0.0
+				elif absf(speed) < ALIGN_SLOW * grid:
+					if sideways:
+						v.z = off * ALIGN_PULL
+					else:
+						v.x = off * ALIGN_PULL
+		if _ray(space, centre, Vector3.RIGHT, grid * 0.7) and _ray(space, centre, Vector3.LEFT, grid * 0.7):
+			p.x = centre.x
+			v.x = 0.0
+		if _ray(space, centre, Vector3.FORWARD, grid * 0.7) and _ray(space, centre, Vector3.BACK, grid * 0.7):
+			p.z = centre.z
+			v.z = 0.0
+		state.transform.origin = p
 
 	# Floor friction, against gravity's press on the floor; the tilted gravity itself is added by the physics step.
 	var flat := Vector3(v.x, 0, v.z).move_toward(Vector3.ZERO, FRICTION * absf(g.dot(normal)) * dt)

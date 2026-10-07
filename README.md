@@ -39,16 +39,18 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 | **Mouse** (or gamepad left stick) | Tilt the world |
 | **Left click** | Aim a slug — left click again to fire |
 | **Right click** | Cancel aiming (keeps the slug) |
+| **H** | How to play (from the title screen) |
 | **Esc** | Pause |
 | **R** | Restart |
 | **Q** | Quit (from the title or pause screen) |
 
 ### Moving
 
-- How far you tilt sets how fast Slock goes: tilt gently to **creep**, tilt hard to **slide**. Level the board and
-  Slock stops on a tile. The dial in the corner shows your tilt: inside its small ring is level.
-- Slock runs along the corridors and turns into side openings when you tilt toward them. Tilt a moment early and it
-  still makes the turn, barely slowing down.
+- Tilt and Slock slides downhill: the harder you tilt, the harder it's pushed. It slides freely, so tilt back the
+  other way to slow down. The dial in the corner shows your tilt.
+- Slock stays centred in the corridors. At a junction, tilt toward an open side and it lines up with the opening
+  and goes in.
+- **Lanes** on the floor show the row and column Slock is on, out to the walls: the ways you can go from here.
 - **Holes and open edges are deadly.** Fall off and you lose a life: you start again at the gate you came in by,
   with the section just as you left it. You start with **3 lives**; lose the last one and the run is over.
 
