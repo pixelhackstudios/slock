@@ -54,7 +54,7 @@ const STEEL_DURATION := 10.0      # Slock of Steel: break inner walls and swurms
 const STEEL_WALL_POINTS := 20
 const CLEAR_DOTS_FRACTION := 0.25 # clear-the-dots removes this much of what's left
 
-const LANE_COLOR := Color(1.0, 0.0, 0.0, 0.15) # the lanes along Slock's row and column (alpha: how see-through)
+const LANE_COLOR := Color(1.0, 0.0, 0.0, 0.35) # the lanes along Slock's row and column (alpha: how see-through)
 
 const BOOST_ACCEL := 80.0         # the climb ramp's booster pushes this hard uphill ...
 const BOOST_SPEED := 15.0         # ... up to this speed, then launches Slock off the top
