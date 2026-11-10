@@ -37,8 +37,8 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 | | |
 |---|---|
 | **Mouse** (or gamepad left stick) | Tilt the world |
-| **Left click** | Aim a slug — left click again to fire |
-| **Right click** | Cancel aiming (keeps the slug) |
+| **Left click** (**A** on a gamepad) | Aim a slug — again to fire |
+| **Right click** (**B** on a gamepad) | Cancel aiming (keeps the slug) |
 | **H** | How to play (from the title screen) |
 | **Esc** | Pause |
 | **R** | Restart |
@@ -47,7 +47,9 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 ### Moving
 
 - Tilt and Slock slides downhill: the harder you tilt, the harder it's pushed. It slides freely, so tilt back the
-  other way to slow down. The dial in the corner shows your tilt.
+  other way to slow down. The dial at the bottom of the screen shows your tilt.
+- **Mouse or gamepad**, whichever you touched last tilts the board, and the hints on screen follow it. On a gamepad,
+  let go of the stick and the board eases back to level.
 - Slock stays centred in the corridors. At a junction, tilt toward an open side and it lines up with the opening
   and goes in.
 - **Lanes** on the floor show the row and column Slock is on, out to the walls: the ways you can go from here.

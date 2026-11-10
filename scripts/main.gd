@@ -9,9 +9,9 @@ extends Node3D
 ## run ends when time runs out, or when you fall down a pit or off an edge with no lives left: you start with three,
 ## each fall costs one and puts you back at the gate you came in by with the section just as it was, and a little
 ## red Slock (a powerup) is one more.
-## Slugs: left click to aim (the game freezes; tilt picks a direction), left click again to fire, right click to
-## back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent ones carry
-## over, pickups add to it, and each gate adds a growing allowance on top. Powerups float in each section and come back 10 s after being taken.
+## Slugs: left click (A on a controller) to aim (the game freezes; tilt picks a direction), again to fire, right
+## click (B) to back out: it kills the first swurm or breaks the first inner wall in its way. Slugs are a store: unspent
+## ones carry over, pickups add to it, and each gate adds a growing allowance on top. Powerups float in each section and come back 10 s after being taken.
 ## Mouse (or left stick) tilts the board; lanes on the floor show Slock's row and column out to the walls. Esc
 ## pauses, R restarts, Q quits (from the title or pause screens).
 ## Runs start from the title screen; a good score goes on the local leaderboard (leaderboard.gd). The welcome screen
@@ -166,7 +166,7 @@ func _start_run(play := true) -> void:
 	slock.reset_to(first.start_position(slock.height))
 	rig.zoom = 1.0
 	rig.gravity_scale = slock.size * speed_of(0)
-	rig.reset_trackball()
+	rig.reset_mouse()
 	rig.snap_to_target()
 	rig.input_enabled = true
 	time_left = START_TIME
@@ -210,7 +210,7 @@ func _begin() -> void:
 	state = State.PLAYING
 	sounds.start_music()
 	rig.input_enabled = true
-	rig.reset_trackball()
+	rig.reset_mouse()
 	_run_started = Time.get_ticks_msec()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	hud.hide_screen()
@@ -277,6 +277,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_on_fire_click()
 		elif event.button_index == MOUSE_BUTTON_RIGHT and aiming:
 			_set_aiming(false) # back out: the slug stays in the store
+	elif event is InputEventJoypadButton and event.pressed and state == State.PLAYING:
+		if event.button_index == JOY_BUTTON_A and Time.get_ticks_msec() - _run_started > 500:
+			_on_fire_click() # the controller's left click
+		elif event.button_index == JOY_BUTTON_B and aiming:
+			_set_aiming(false) # ... and right click: back out, the slug stays in the store
 
 
 # ------------------------------------------------------------------ sections
@@ -320,7 +325,7 @@ func _process(delta: float) -> void:
 		return
 	if aiming:
 		_update_aim()
-		hud.show_slugs(slugs, true)
+		hud.show_slugs(slugs, true, rig.using_pad)
 		_show_lanes(sections[current])
 		return
 	now += delta
@@ -342,7 +347,7 @@ func _process(delta: float) -> void:
 			_end_run("OUT OF TIME")
 	hud.show_status(score(), time_left, here.pellets_left(), maxf(0.0, power_until - now), height,
 		Section.block_of(height))
-	hud.show_slugs(slugs, false)
+	hud.show_slugs(slugs, false, rig.using_pad)
 	hud.show_lives(lives)
 	hud.show_steel(maxf(0.0, _steel_until - now))
 	_show_lanes(here)
@@ -575,7 +580,7 @@ func _fall(here: Section) -> void:
 		_end_run("OUT OF LIVES")
 		return
 	slock.reset_to(here.start_position(slock.height))
-	rig.reset_trackball()
+	rig.reset_mouse()
 	rig.snap_to_target()
 	sounds.ouch()
 	hud.popup("LIFE LOST   x%d LEFT" % lives, Hud.RED, 1.6)

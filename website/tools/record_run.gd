@@ -54,7 +54,7 @@ class Pilot extends Node:
 			get_tree().quit()
 			return
 		var rig: TiltRig = main.rig
-		rig._trackball = _stick(now)
+		rig._mouse = _stick(now)
 		if int(now) != _said and int(now) % 4 == 0:
 			_said = int(now)
 			print("%2ds  section %d  lives %d  score %d" % [_said, main.current, main.lives, main.score()])

@@ -32,6 +32,7 @@ var _popups: VBoxContainer
 var _flash: ColorRect
 var _screen: Control               # the pause, title or game-over screen, rebuilt each time it's shown
 var _name_box: LineEdit
+var _help: Label                   # the controls line along the bottom, for the mouse or the controller
 
 
 func _init() -> void:
@@ -59,11 +60,10 @@ func _init() -> void:
 	_power = _label(_status, "", 18, POWER_BLUE, HORIZONTAL_ALIGNMENT_CENTER, 112)
 	_steel = _label(_status, "", 18, Color(0.85, 0.88, 0.95), HORIZONTAL_ALIGNMENT_CENTER, 140)
 	_slugs = _label(_status, "", 18, Color(1, 1, 1, 0.7), HORIZONTAL_ALIGNMENT_RIGHT, 168)
-	var help := _label(_status, "Mouse: tilt    Esc: pause    R: restart", 16, Color(1, 1, 1, 0.6),
-		HORIZONTAL_ALIGNMENT_CENTER, 0)
-	help.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	help.offset_top = -36
-	help.add_theme_color_override("font_shadow_color", Color.TRANSPARENT) # small faded text reads doubled with one
+	_help = _label(_status, "", 16, Color(1, 1, 1, 0.6), HORIZONTAL_ALIGNMENT_CENTER, 0)
+	_help.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_help.offset_top = -36
+	_help.add_theme_color_override("font_shadow_color", Color.TRANSPARENT) # small faded text reads doubled with one
 
 	_popups = VBoxContainer.new()
 	_popups.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -93,12 +93,17 @@ func show_status(score: int, time_left: float, pellets_left: int, power_left: fl
 	_power.text = "POWER  %.1f" % power_left if power_left > 0.0 else ""
 
 
-## The slug count, or the aiming hint.
-func show_slugs(count: int, aiming: bool) -> void:
+## The slug count or the aiming hint, and the controls line: for the controller if `pad` (it was used last), else
+## the mouse.
+func show_slugs(count: int, aiming: bool, pad: bool) -> void:
 	if aiming:
-		_slugs.text = "AIMING — TILT TO PICK, LEFT CLICK FIRES, RIGHT CLICK CANCELS"
+		var how := "A FIRES, B CANCELS" if pad else "LEFT CLICK FIRES, RIGHT CLICK CANCELS"
+		_slugs.text = "AIMING — TILT TO PICK, " + how
+	elif count > 0:
+		_slugs.text = "SLUGS x%d — %s TO AIM" % [count, "A" if pad else "CLICK"]
 	else:
-		_slugs.text = "SLUGS x%d — CLICK TO AIM" % count if count > 0 else "NO SLUGS"
+		_slugs.text = "NO SLUGS"
+	_help.text = "%s: tilt    Esc: pause    R: restart" % ("Stick" if pad else "Mouse")
 
 
 ## Lives left (under the score).
@@ -233,8 +238,9 @@ static func _welcome_parts() -> Array:
 			["slug_pack", "SLUG PACK", "+%d slugs." % Main.SLUG_PACK],
 			["extra_slug", "BIG SLUG", "+1 slug."]]],
 		["SLUGS", "every gate gives you more", [
-			["slug", "AIM AND FIRE", "Left click to aim (the game waits), tilt to pick a way, left click to fire, " +
-				"right click to cancel. A slug kills the first swurm or breaks the first inner wall in its way."]]],
+			["slug", "AIM AND FIRE", "Left click (A) to aim (the game waits), tilt to pick a way, left click (A) to " +
+				"fire, right click (B) to cancel. A slug kills the first swurm or breaks the first inner wall in its " +
+				"way."]]],
 	]
 
 

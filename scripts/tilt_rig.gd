@@ -2,12 +2,19 @@ class_name TiltRig
 extends Camera3D
 ## "Tilting the world": mouse input picks a tilt. A single tilted gravity vector drives the physics and the
 ## camera presents that exact same rotation, so apparent downhill and simulated downhill cannot diverge.
-## Mouse movement accumulates into a persistent 2D trackball (it stays where you leave it), and that is the tilt,
-## straight: halfway out is half tilt. The left stick, when pushed, replaces the trackball.
+## Whichever was used last tilts the board (using_pad): moving the mouse hands it to the mouse, pushing the left stick
+## past STICK_TAKEOVER hands it to the stick.
+##   Mouse: movement moves the board's tilt and it stays where you leave it (TRACKBALL_PIXELS from level to full).
+##   Stick: it sets where the board is heading and the board eases there (STICK_RESPONSE), as Super Monkey Ball does,
+##     so a stick let go doesn't snap the board level in the time it takes to spring back.
 
 const MAX_TILT := 25.0            # degrees of world/camera tilt at full input
 const FALL_GRAVITY := 75.0        # strength of the tilted gravity
 const TRACKBALL_PIXELS := 320.0   # mouse travel (px) from level to full tilt
+const STICK_TAKEOVER := 0.24      # of the stick's travel (Xbox's standard dead zone): a push past this hands the
+                                  # tilt to the stick; a thumb resting on it doesn't
+const STICK_RESPONSE := 0.075     # s: the board's time constant easing to where the stick puts it (Super Monkey
+                                  # Ball's stage moves 20% of the way each 60 fps frame, which is 75 ms)
 
 var target: Node3D
 var yaw := 28.0
@@ -21,8 +28,9 @@ var input_enabled := true        # off: the board eases back to level (paused, r
 var gravity_scale := 1.0          # block size times the section's speed ramp (1 on the first section)
 
 var tilt := Vector2.ZERO          # current tilt, each axis -1..1 (x = screen right, y = screen up)
-var stick := Vector2.ZERO         # where the hand is: trackball or stick, -1..1, before the response curve
-var _trackball := Vector2.ZERO
+var hand := Vector2.ZERO          # where the hand has the board, -1..1: the mouse's or the stick's (the dial shows)
+var using_pad := false            # the stick was used last, not the mouse (it has the tilt, and the hints follow it)
+var _mouse := Vector2.ZERO        # where the mouse has put the board (it stays there between moves)
 var _pivot := Vector3.ZERO
 var _pivot_vel := Vector3.ZERO
 
@@ -42,20 +50,33 @@ func snap_to_target() -> void:
 	_zoom_now = zoom
 
 
-func reset_trackball() -> void:
-	_trackball = Vector2.ZERO
+func reset_mouse() -> void:
+	_mouse = Vector2.ZERO
 
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var d: Vector2 = event.screen_relative
-		_trackball += Vector2(d.x, -d.y) / TRACKBALL_PIXELS
-		_trackball = _trackball.limit_length(1.0)
+		if using_pad:
+			using_pad = false # the mouse takes over, from level
+			_mouse = Vector2.ZERO
+		_mouse = (_mouse + Vector2(d.x, -d.y) / TRACKBALL_PIXELS).limit_length(1.0)
 
 
 func _process(delta: float) -> void:
-	stick = hand()
-	tilt = stick
+	var pad := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
+	if pad.length() > STICK_TAKEOVER:
+		using_pad = true # pushing the stick hands it the board
+
+	if not input_enabled:
+		hand = Vector2.ZERO
+		tilt = Vector2.ZERO
+	elif using_pad:
+		hand = pad.limit_length(1.0)
+		tilt = tilt.lerp(hand, 1.0 - exp(-delta / STICK_RESPONSE)) # eases there, like Super Monkey Ball
+	else:
+		hand = _mouse
+		tilt = hand
 	# One world, one downhill direction: the force field and the visible tilt are the same rotation.
 	var space := get_world_3d().space
 	PhysicsServer3D.area_set_param(space, PhysicsServer3D.AREA_PARAM_GRAVITY_VECTOR, gravity_dir())
@@ -69,17 +90,6 @@ func _process(delta: float) -> void:
 	var rot := Basis(world_tilt) * _base_rot()
 	_zoom_now = lerpf(_zoom_now, zoom, 1.0 - exp(-2.0 * delta))
 	global_transform = Transform3D(rot, _pivot + rot * Vector3(0, 0, distance * _zoom_now))
-
-
-## Where the hand is right now (-1..1, x = screen right, y = screen up): the trackball, or the left stick when it's
-## pushed.
-func hand() -> Vector2:
-	if not input_enabled:
-		return Vector2.ZERO
-	var pad := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
-	if pad.length_squared() > 0.0004:
-		return pad.limit_length(1.0)
-	return _trackball
 
 
 ## The camera's untilted orientation: looking down at `pitch`, turned by `yaw` (to the right).

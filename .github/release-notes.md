@@ -6,8 +6,8 @@
 | **Linux** | `Slock-Linux.tar.gz` — extract it, run `Slock/Slock.x86_64` |
 
 ### What's new
-- **The lanes on the floor are easier to see.** They're brighter, so the row and column Slock is on stand out at speed.
-
-Everything from 0.12.0 is here too: the rebuilt controls (tilt the board and Slock slides downhill, stays centred in corridors and lines up with openings at junctions), the lanes, and the welcome screen (press **H** on the title screen).
+- **Play with a gamepad.** The left stick tilts the board, **A** aims a slug and fires it, and **B** stops aiming. Let go of the stick and the board eases back to level instead of snapping.
+- **Mouse or gamepad, no switching.** Whichever you touched last tilts the board, and the hints on screen follow it. A thumb resting on the stick doesn't steal the board from the mouse.
+- **The tilt dial** has moved to the bottom middle of the screen, nearer where you're looking.
 
 Early pre-release: Windows and Mac builds haven't been tried on real machines yet. If something breaks, please [open an issue](https://github.com/pixelhackstudios/slock/issues).
