@@ -44,6 +44,8 @@ var tiles: Array = []             # tiles[col][row]: VOID, FLOOR or WALL
 var levels: Array = []            # levels[col][row]: Level
 var swurm_homes: Array[Vector2i] = []
 var swurms: Array[Swurm] = []
+var slime: SlimeTrail             # the slime the swurms leave behind them (looks only)
+const SLIME_PER_SWURM := 24       # smears each swurm's slime can have out: a bit over SlimeTrail.LIFE of crawling
 var pellets := {}                 # Vector2i(col, row) -> what floats there (Eaten): pellet, power pellet, clock, key
 var _prev_floor := 0.0            # where the climb ramp starts from: the previous section's floor
 var _side := Vector3i(-1, -1, -1) # the side ramp: first col, last col, row (-1: none)
@@ -84,6 +86,8 @@ func _init(section_index: int, seed: int) -> void:
 	floor_y = index * RISE
 	_prev_floor = maxf(0.0, floor_y - RISE)
 	near_edge = near_edge_of(index)
+	slime = SlimeTrail.new(tile, MazeGen.swurm_count(index) * SLIME_PER_SWURM) # here, so it's there mid-build too
+	add_child(slime)
 
 
 func _ready() -> void:
@@ -855,11 +859,12 @@ func is_inner_wall(t: Vector2i) -> bool:
 		and t.y > maze_start and t.y < length - 1
 
 
-## Blast an inner wall block into open floor. False if it isn't one.
+## Blast an inner wall block into open floor; it bursts into dust and debris (block_burst.gd). False if it isn't one.
 func blast_wall(t: Vector2i) -> bool:
 	if not is_inner_wall(t):
 		return false
 	tiles[t.x][t.y] = FLOOR
+	BlockBurst.spawn(self, tile_centre(t), tile)
 	# Its wall slabs go; what's left of each either side of the gap goes back as new slabs.
 	for cs: CollisionShape3D in _wall_slabs.get(t, []).duplicate():
 		var r: Rect2i = cs.get_meta("extent")
@@ -1203,17 +1208,6 @@ func _place_powerup(key: Vector2i, kind: Eaten) -> void:
 	else:
 		node = _add_model(POWERUP_MODELS[kind])
 	_add_pickup(key, kind, node)
-
-
-## Polished steel: Slock of Steel's powerup (and Slock while it lasts, see jelly.gd).
-static func steel_look() -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.78, 0.8, 0.85)
-	m.metallic = 0.9
-	m.roughness = 0.08
-	m.emission_enabled = true
-	m.emission = Color(0.12, 0.12, 0.14)
-	return m
 
 
 ## A powerup was taken here: a new one appears POWERUP_RESPAWN seconds later.

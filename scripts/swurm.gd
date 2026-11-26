@@ -1,14 +1,13 @@
 class_name Swurm
 extends Node3D
-## A swurm: a green block worm that inches through the maze like a telescope. The head, one tile cube, slides two
-## tiles while the body stays put; then it stops and the five segments (each 20% smaller than the one ahead)
+## A swurm: a green block worm that inches through the maze like a telescope. The head, one tile cube, slides one
+## tile while the body stays put; then it stops and the five segments (each 20% smaller than the one ahead)
 ## follow in a short train until they are all tucked inside the head, and it slides again. Nothing rotates: the
 ## blocks stay square to the grid. Touching the head knocks Slock and the swurm about 3 tiles apart, unless a
-## power pellet is active (see main.gd), in which case it gets eaten. It starts at home in the pen and waits there
-## until released.
+## power pellet is active (see main.gd), in which case it gets eaten. A swurm that has stolen time turns the slug's
+## orange until it's eaten and gives the time back. It starts at home in the pen and waits there until released.
 
 const SEGMENT_SCALE: Array[float] = [0.8, 0.64, 0.512, 0.41, 0.328] # each 20% smaller than the one ahead
-const SLIDE_TILES := 2            # the head slides two tiles per move (one where two won't fit)
 const SEGMENT_GAP := 0.08         # edge-to-edge gap between segments in the train, in tiles
 const KNOCK_SPEED := 2.5          # a knock-back slide runs this many times faster than crawling
 const SCARED_SPEED := 0.55        # frightened swurms (power pellet active) are slow
@@ -16,6 +15,7 @@ const SCARED_SPEED := 0.55        # frightened swurms (power pellet active) are 
 const GREEN := [Color(0.2, 0.75, 0.12, 0.72), Color(0.02, 0.18, 0.0)]  # [colour (alpha: see-through), glow]
 const SCARED := [Color(0.15, 0.3, 1.0, 0.72), Color(0.02, 0.08, 0.5)]
 const FLASH := [Color(1, 1, 1, 0.72), Color(0.6, 0.6, 0.6)]             # scared, power about to run out
+const THIEF := [Color(1.0, 0.52, 0.08, 0.72), Color(0.22, 0.09, 0.0)]   # has stolen time: the slug's orange
 
 enum Mood { NORMAL, SCARED, FLASH }
 
@@ -37,7 +37,7 @@ var _gather_time := 0.0
 var _gather_from: Array[Vector3] = []
 var _head: Jelly
 var _body: Array[Jelly] = []
-var _shown_mood := -1
+var _shown: Array = []            # the look its blocks have now
 var _release_at := INF            # waits at home in the pen until then
 var _respawn_at := 0.0
 
@@ -47,7 +47,6 @@ func _init(home_section: Section, home: Vector2i) -> void:
 	_size = home_section.tile
 	_home = home
 	_head = Jelly.new(Vector3.ONE * _size, Jelly.Look.SWURM)
-	_head.wobbles = false # stays an exact one-tile cube
 	add_child(_head)
 	for s in SEGMENT_SCALE:
 		var seg := Jelly.new(Vector3.ONE * _size * s, Jelly.Look.SWURM)
@@ -67,7 +66,7 @@ func reset() -> void:
 	_head.position = _pos(_home)
 	for i in _body.size():
 		_body[i].position = _floor_point(_head.position, SEGMENT_SCALE[i])
-	_shown_mood = -1
+	_shown = []
 	_pick_next()
 
 
@@ -141,6 +140,9 @@ func tick(delta: float, now: float) -> void:
 		if _t < 1.0:
 			return
 		_sliding = false
+		var floor_y := section.floor_y
+		section.slime.lay(Vector3(_slide_start.x, floor_y, _slide_start.z), Vector3(end.x, floor_y, end.z),
+			_look()[0], now)
 		_gather_time = 0.0
 		_gather_from.clear()
 		for seg in _body:
@@ -166,24 +168,29 @@ func tick(delta: float, now: float) -> void:
 		_pick_next()
 
 
+## [colour, glow]: green, slug orange once it has stolen time (until it's eaten and gives it back), and blue or
+## flashing white while scared, whatever it's carrying, so it always reads as edible.
+func _look() -> Array:
+	if mood != Mood.NORMAL:
+		return [GREEN, SCARED, FLASH][mood]
+	return THIEF if stolen_time > 0.0 else GREEN
+
+
 func _update_look() -> void:
-	if mood == _shown_mood:
+	var look := _look()
+	if look == _shown:
 		return
-	_shown_mood = mood
-	var look: Array = [GREEN, SCARED, FLASH][mood]
+	_shown = look
 	for block in [_head] + _body:
 		block.set_colors(look[0], look[1])
 
 
-## Start the next slide from `_to`: two tiles straight on if it can, else one, never straight back the way it
-## came unless it's a dead end.
+## Start the next slide from `_to`: one tile, any way but straight back the way it came unless it's a dead end.
 func _pick_next() -> void:
 	var back := _from - _to
 	back = Vector2i(signi(back.x), signi(back.y))
 	_from = _to
-	var next: Variant = _choose(SLIDE_TILES, back)
-	if next == null:
-		next = _choose(1, back)
+	var next: Variant = _choose(back)
 	_to = next if next != null else _from + back
 	_slide_start = _pos(_from)
 	_t = 0.0
@@ -191,16 +198,11 @@ func _pick_next() -> void:
 	_knocked = false
 
 
-func _choose(tiles: int, back: Vector2i) -> Variant:
+func _choose(back: Vector2i) -> Variant:
 	var options: Array[Vector2i] = []
 	for d in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(1, 0)]:
-		if d == back:
-			continue
-		var clear := true
-		for i in range(1, tiles + 1):
-			clear = clear and section.is_crawlable(_from + d * i)
-		if clear:
-			options.append(_from + d * tiles)
+		if d != back and section.is_crawlable(_from + d):
+			options.append(_from + d)
 	return options.pick_random() if not options.is_empty() else null
 
 

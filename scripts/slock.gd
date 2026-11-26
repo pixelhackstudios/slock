@@ -12,6 +12,7 @@ const SHRINK_SPEED := 3.0         # block sizes per second, shrinking through a 
 const MAX_SPEED := 60.0           # safety limit only, well above what gravity reaches
 
 const FRICTION := 0.058           # floor friction coefficient (0 = ice)
+const BRAKE_FRICTION := 0.8       # added at full brake: beats full tilt (tan 25° = 0.47), so it holds Slock still
 const HOLE_SNAP := 14.0           # how fast it lines up with a hole it's dropping into
 const ALIGN_REACH := 0.1          # tiles: this close to the centre, lining up for an opening snaps it there ...
 const ALIGN_SLOW := 2.0           # ... and below this speed (tiles/s) that way, it's drawn there ...
@@ -28,6 +29,7 @@ var grounded := false
 var on_flat := false              # on a flat floor (not a ramp)
 var boost := Vector3.ZERO         # set by the ramp booster each physics frame: extra acceleration uphill
 var boost_limit := 0.0            # ... until it's going this fast uphill
+var brake := 0.0                  # 0..1: how hard the brake is on (the right trigger, set by the tilt rig)
 var launching := false
 var _guiding := false
 var _guide_dir := Vector3.ZERO
@@ -234,8 +236,16 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 			v.z = 0.0
 		state.transform.origin = p
 
-	# Floor friction, against gravity's press on the floor; the tilted gravity itself is added by the physics step.
-	var flat := Vector3(v.x, 0, v.z).move_toward(Vector3.ZERO, FRICTION * absf(g.dot(normal)) * dt)
+	# Floor friction (plus the brake), against gravity's press on the floor; the tilted gravity itself is added by the
+	# physics step.
+	var mu := FRICTION + brake * BRAKE_FRICTION
+	var grip := mu * absf(g.dot(normal)) * dt
+	var flat := Vector3(v.x, 0, v.z).move_toward(Vector3.ZERO, grip)
+	# Braked to a stop, the brake holds it there if it can beat the downhill pull: the next step adds that pull before
+	# it moves Slock, so cancel it ahead (otherwise it creeps downhill a step at a time).
+	var downhill := g - normal * g.dot(normal)
+	if brake > 0.0 and flat == Vector3.ZERO and downhill.length() * dt <= grip:
+		flat = Vector3(-downhill.x, 0, -downhill.z) * dt
 	# Safety limit only (keeps fast falls from tunnelling); not part of the feel.
 	if flat.length() > MAX_SPEED:
 		flat = flat.normalized() * MAX_SPEED

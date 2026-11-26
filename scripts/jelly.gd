@@ -4,7 +4,8 @@ extends Node3D
 ## the bottom when the block speeds up, stops or turns, and the whole block squishes and springs back when it
 ## smacks into a wall. jelly_wobble.gdshaderinc does the bending. Every jelly is see-through with a thin outline.
 ##   SLOCK: red with a darker core inside; moves with `body` (a physics body).
-##   SWURM: no core, recoloured with set_colors(); moves however its node is moved.
+##   SWURM: no core, recoloured with set_colors(); moves however its node is moved, and never wobbles (the swurms'
+##          slides are too small and smooth for it to show, and there are thousands of their blocks).
 
 enum Look { SLOCK, SWURM }
 
@@ -22,14 +23,15 @@ const IMPACT_THRESHOLD := 1.5     # sudden speed change (per physics step) that 
 
 const OUTLINE_COLOR := Color(0, 0, 0, 1.0)
 const OUTLINE_PX := 1.0
+const STEEL_FIT := 1.0 / 0.404   # scales models/steel.glb (0.404 across, rivets included) to fill the block
 
 var body: RigidBody3D
-var wobbles := true
+var wobbles := true               # set before it's added; a jelly that doesn't wobble runs no code each frame
 var _material: ShaderMaterial
 var _outline: ShaderMaterial
 var _core: MeshInstance3D
 var _shell: MeshInstance3D
-var _steel: StandardMaterial3D
+var _steel: Node3D               # Slock of Steel's model, made the first time it's needed
 var _last_pos := Vector3.ZERO
 var _last_vel := Vector3.ZERO
 var _sway := Vector2.ZERO
@@ -65,6 +67,7 @@ func _init(size: Vector3, look := Look.SLOCK) -> void:
 	_outline.set_shader_parameter("width_px", OUTLINE_PX)
 	_material.next_pass = _outline
 	if look == Look.SWURM:
+		wobbles = false
 		return
 
 	# A darker core you can see through the jelly, for depth.
@@ -81,15 +84,19 @@ func _init(size: Vector3, look := Look.SLOCK) -> void:
 	add_child(_core)
 
 
-## Slock of Steel: polished steel instead of jelly while `on` (no wobble, no core, no outline: it's solid).
+## Slock of Steel: the steel pickup's own model (models/steel.glb) in place of the jelly while `on`. It fills the block,
+## plates and rivets included, and doesn't wobble (the jelly shader does the wobbling).
 func set_steel(on: bool) -> void:
 	if _steel == null:
-		_steel = Section.steel_look()
-	var want: Material = _steel if on else _material
-	if _shell.material_override != want:
-		_shell.material_override = want
-		if _core != null:
-			_core.visible = not on
+		if not on:
+			return
+		_steel = Section.model("steel", true, true)
+		_steel.scale = Vector3.ONE * STEEL_FIT
+		add_child(_steel)
+	_steel.visible = on
+	_shell.visible = not on
+	if _core != null:
+		_core.visible = not on
 
 
 ## The colour (alpha: how see-through) and glow.
@@ -109,6 +116,8 @@ func hit(normal: Vector3, speed: float) -> void:
 
 func _ready() -> void:
 	_last_pos = global_position
+	set_process(wobbles)
+	set_physics_process(wobbles)
 
 
 func _physics_process(dt: float) -> void:

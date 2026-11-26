@@ -38,7 +38,7 @@ static func swurm_count(i: int) -> int:
 
 
 static func swurm_speed(i: int) -> float:
-	return minf(20.6, 15.0 + i * 0.3) # tiles/s
+	return minf(25.75, 18.75 + i * 0.375) # tiles/s the head slides (it gets round the maze at about a quarter of that)
 
 
 const POWERUPS := 3                # powerups out at once in a section

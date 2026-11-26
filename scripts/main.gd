@@ -334,6 +334,7 @@ func _process(delta: float) -> void:
 		var flashing := power_until - now < POWER_FLASH and fmod(now, 0.3) < 0.15
 		mood = Swurm.Mood.FLASH if flashing else Swurm.Mood.SCARED
 	for s in sections.values():
+		s.slime.set_now(now)
 		for swurm in s.swurms:
 			swurm.mood = mood
 			swurm.tick(delta, now)
@@ -595,6 +596,7 @@ func _tick_steel(here: Section, p: Vector3) -> void:
 		return
 	if here.blast_wall(here.tile_under(p) + _tilt_step()):
 		_bonus += STEEL_WALL_POINTS
+		hud.toast("+%d" % STEEL_WALL_POINTS)
 
 
 ## The grid direction the board slopes down (N/E/S/W): the same gravity Slock feels.

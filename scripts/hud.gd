@@ -12,6 +12,12 @@ const RED := Color(1.0, 0.25, 0.33)
 const CYAN := Color(0.35, 0.75, 1.0)
 const POWER_BLUE := Color(0.45, 0.6, 1.0)
 const PELLET_CREAM := Color(1.0, 0.92, 0.7)
+const TOAST_GOLD := Color(1.0, 0.84, 0.3) # points toasts (toast()) ...
+const TOAST_TIME := 0.9           # ... take this long to slide up and fade ...
+const TOAST_RISE := 90.0          # ... rising this many pixels ...
+const TOAST_FROM := 70.0          # ... from this far below the top of the pop-up area ...
+const TOAST_GAP := 0.18           # ... each starting at least this long after the last ...
+const TOAST_LAG := 0.4            # ... but never more than this long after it was earned
 const BOARD_WIDTH := 460.0
 const ITEM_WIDTH := 330.0         # the welcome screen: one model and its words ...
 const MODEL_PX := 76.0            # ... the model's little window ...
@@ -29,6 +35,8 @@ var _lives: Label
 var _steel: Label
 var _power: Label
 var _popups: VBoxContainer
+var _toasts: Control             # points toasts, sliding up out of the pop-up area (see toast())
+var _next_toast := 0.0            # when the next toast may start (they follow each other)
 var _flash: ColorRect
 var _screen: Control               # the pause, title or game-over screen, rebuilt each time it's shown
 var _name_box: LineEdit
@@ -70,6 +78,7 @@ func _init() -> void:
 	_popups.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_popups)
 
+	_toasts = _full_rect(self)
 	_screen = _full_rect(self)
 
 
@@ -103,7 +112,8 @@ func show_slugs(count: int, aiming: bool, pad: bool) -> void:
 		_slugs.text = "SLUGS x%d — %s TO AIM" % [count, "A" if pad else "CLICK"]
 	else:
 		_slugs.text = "NO SLUGS"
-	_help.text = "%s: tilt    Esc: pause    R: restart" % ("Stick" if pad else "Mouse")
+	var controls := "Stick: tilt    RT: brake" if pad else "Mouse: tilt    W: brake    Space: look"
+	_help.text = "%s    Esc: pause    R: restart" % controls
 
 
 ## Lives left (under the score).
@@ -122,14 +132,44 @@ func popup(text: String, color: Color, seconds: float) -> void:
 	l.set_meta("until", _real_time() + seconds)
 
 
+## A small points toast, like "+20": it slides up out of the pop-up area and fades. One that comes hard on the heels
+## of the last waits TOAST_GAP behind it, so a run of them ripples up instead of piling on top of each other, but
+## never more than TOAST_LAG (smashing through walls fast, they bunch up rather than trail on after it's over).
+func toast(text: String) -> void:
+	var l := _label(_toasts, text, 30, TOAST_GOLD, HORIZONTAL_ALIGNMENT_CENTER, 0)
+	var now := _real_time()
+	var start := maxf(now, minf(_next_toast, now + TOAST_LAG))
+	_next_toast = start + TOAST_GAP
+	l.set_meta("start", start)
+	l.modulate.a = 0.0
+	_slide(l, _real_time())
+
+
+func toast_count() -> int:
+	return _toasts.get_child_count()
+
+
+## Where a toast is at time `t`: waiting (hidden), rising and fading, or done (gone).
+func _slide(l: Label, t: float) -> void:
+	var f: float = (t - l.get_meta("start")) / TOAST_TIME
+	if f >= 1.0:
+		l.queue_free()
+		return
+	var top := _h() * 0.3 + TOAST_FROM - TOAST_RISE * ease(maxf(f, 0.0), 0.5) # quick off the mark, easing up
+	l.offset_top = top
+	l.offset_bottom = top + 40
+	l.modulate.a = 0.0 if f < 0.0 else 1.0 - f * f
+
+
 ## The screen flashes green (a swurm stole time).
 func flash() -> void:
 	_flash.color.a = 0.25
 
 
 func clear_popups() -> void:
-	for l in _popups.get_children():
+	for l in _popups.get_children() + _toasts.get_children():
 		l.queue_free()
+	_next_toast = 0.0 # nothing left to wait behind
 
 
 # ------------------------------------------------------------------ screens
@@ -288,7 +328,6 @@ static func _welcome_model(name: String) -> Node3D:
 			var at := 0.0
 			for s in [1.0] + Swurm.SEGMENT_SCALE:
 				var block := Jelly.new(Vector3.ONE * s, Jelly.Look.SWURM)
-				block.wobbles = false
 				block.set_colors(Swurm.GREEN[0], Swurm.GREEN[1])
 				if s < 1.0:
 					at += (size + s) * 0.5 + Swurm.SEGMENT_GAP
@@ -474,6 +513,9 @@ func _process(delta: float) -> void:
 			l.queue_free()
 		else:
 			l.modulate.a = clampf(left, 0.0, 1.0)
+	for l: Label in _toasts.get_children():
+		if not l.is_queued_for_deletion():
+			_slide(l, t)
 
 
 func _full_rect(parent: Node) -> Control:

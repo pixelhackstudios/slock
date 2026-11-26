@@ -1,11 +1,12 @@
 """
-Slock's 3D models, built from scratch in Blender: the maze kit the sections are assembled from, and the pickups.
+Slock's 3D models, built from scratch in Blender: the maze kit the sections are assembled from, the pickups, and
+the logo.
 
     flatpak run org.blender.Blender -b --python art-work/models.py -- [options]
     python3 art-work/models.py [options]          (with Blender's Python module: pip install bpy)
 
 Options:
-    --only PART[,PART...]           build just those parts: kit, textures, pickups, or one texture set by name
+    --only PART[,PART...]           build just those parts: kit, textures, pickups, logo, or one texture set by name
                                     (default: everything)
     --quick                         low sample counts, for a fast look
     --preview DIR                   also render a preview of each model into DIR
@@ -24,6 +25,7 @@ It writes:
                                     cliff
     models/<pickup>.glb             the powerups and pickups, with their materials: clear_dots, steel, slug_pack,
                                     extra_slug, close_traps, clock, key, slug, gate, chevron
+    textures/logo.png               the SLOCK wordmark, 2560x640 on a transparent background
 
 Units: one block (tile) is 1.0. Blender is Z-up; the glTF files come out Y-up, which is what Godot uses. Shapes are
 written here in Godot's axes through gd(x, y, z): x right, y up, z towards the camera (the near side of a tile).
@@ -1194,6 +1196,214 @@ def preview(name, objects):
     print("preview", sc.render.filepath)
 
 
+# ------------------------------------------------------------------------------------------------- logo
+#
+# The SLOCK wordmark from the mood board: heavy, squared concrete letters, the O a ring holding Slock, a red jelly
+# cube. The letters are drawn here as outlines (one unit tall, x right, y up) rather than set in a font, so nothing
+# needs a font licence; each is a filled, extruded and bevelled curve standing up to face the camera.
+
+LOGO_STEM = 0.40                 # the letters' vertical strokes ...
+LOGO_BAR = 0.30                  # ... and their horizontal ones
+LOGO_GAP = 0.08                  # the space between letters
+LOGO_DEPTH = 0.20                # half a letter's thickness
+LOGO_EDGE = 0.028                # the rounding on the letters' edges
+
+
+def fillet(points, radii, segments=6):
+    """A closed 2D outline with each corner rounded by its radius (0 leaves it sharp)."""
+    out = []
+    n = len(points)
+    for i in range(n):
+        p, a, b, r = Vector(points[i]), Vector(points[i - 1]), Vector(points[(i + 1) % n]), radii[i]
+        if r <= 0:
+            out.append(p)
+            continue
+        d1, d2 = (a - p).normalized(), (b - p).normalized()
+        half = d1.angle(d2) / 2
+        centre = p + (d1 + d2).normalized() * (r / math.sin(half))
+        t1, t2 = p + d1 * (r / math.tan(half)), p + d2 * (r / math.tan(half))
+        a1 = math.atan2(t1.y - centre.y, t1.x - centre.x)
+        a2 = math.atan2(t2.y - centre.y, t2.x - centre.x)
+        sweep = (a2 - a1 + math.pi) % (2 * math.pi) - math.pi
+        for k in range(segments + 1):
+            angle = a1 + sweep * k / segments
+            out.append(centre + Vector((math.cos(angle), math.sin(angle))) * r)
+    return out
+
+
+def logo_letters():
+    """Each letter's outlines (a hole winds the other way) and its width, in order."""
+    s, b = LOGO_STEM, LOGO_BAR
+
+    w = 1.0                                       # S: three bars, the slits between them narrow
+    top, mid = 0.27, 0.22
+    m0, m1 = (1 - mid) / 2, (1 + mid) / 2
+    S = fillet([(0, 0), (w, 0), (w, m1), (s, m1), (s, 1 - top), (w, 1 - top), (w, 1), (0, 1), (0, m0),
+                (w - s, m0), (w - s, top), (0, top)],
+               [0.03, 0.24, 0.24, 0.04, 0.03, 0.03, 0.03, 0.24, 0.24, 0.04, 0.03, 0.03])
+    letters = [([S], w)]
+
+    w = 0.82
+    letters.append(([fillet([(0, 0), (w, 0), (w, b), (s, b), (s, 1), (0, 1)],
+                            [0.05, 0.03, 0.03, 0, 0.03, 0.05])], w))
+
+    w, ring = 1.0, 0.27                           # O: a ring as heavy as the other letters, for Slock to sit in
+    letters.append(([fillet([(0, 0), (w, 0), (w, 1), (0, 1)], [0.22] * 4),
+                     fillet([(ring, ring), (ring, 1 - ring), (w - ring, 1 - ring), (w - ring, ring)], [0.07] * 4)],
+                    w))
+
+    w = 0.96
+    letters.append(([fillet([(0, 0), (w, 0), (w, b), (s, b), (s, 1 - b), (w, 1 - b), (w, 1), (0, 1)],
+                            [0.28, 0.03, 0.03, 0.07, 0.07, 0.03, 0.03, 0.28])], w))
+
+    w, arm = 1.0, 0.42                            # K: the arm and leg meet the stem's middle
+    joint = (s + 0.18, 0.5)
+    letters.append(([fillet([(0, 0), (s, 0), (s, 0.30), (w - arm, 0), (w, 0), joint, (w, 1), (w - arm, 1),
+                             (s, 0.70), (s, 1), (0, 1)],
+                            [0.05, 0.03, 0.03, 0.03, 0.03, 0.04, 0.03, 0.03, 0.03, 0.03, 0.05])], w))
+    return letters
+
+
+def logo_concrete():
+    """Off-white concrete: dark speckles, a faint blotchy tint, darker in the creases, a little bumpy."""
+    m = bpy.data.materials.new("logo_concrete")
+    m.use_nodes = True  # Blender 4 (5 always uses nodes)
+    nt = m.node_tree
+    nt.nodes.clear()
+    new, link_ = nt.nodes.new, nt.links.new
+    coords = new("ShaderNodeTexCoord")
+    speckle = new("ShaderNodeTexNoise")
+    speckle.inputs["Scale"].default_value = 90
+    speckle.inputs["Detail"].default_value = 6
+    dots = new("ShaderNodeValToRGB")
+    dots.color_ramp.elements[0].position = 0.58
+    dots.color_ramp.elements[0].color = srgb(0.93, 0.92, 0.89)
+    dots.color_ramp.elements[1].position = 0.66
+    dots.color_ramp.elements[1].color = (0.18, 0.175, 0.17, 1)
+    blotch = new("ShaderNodeTexNoise")
+    blotch.inputs["Scale"].default_value = 6
+    blotch.inputs["Detail"].default_value = 4
+    tint = new("ShaderNodeMix")
+    tint.data_type, tint.blend_type = "RGBA", "MULTIPLY"
+    tint.inputs[0].default_value = 0.12
+    ao = new("ShaderNodeAmbientOcclusion")
+    ao.inputs["Distance"].default_value = 0.08
+    exposed = new("ShaderNodeMath")
+    exposed.operation = "SUBTRACT"
+    exposed.inputs[0].default_value = 1.0
+    grime = new("ShaderNodeMix")
+    grime.data_type, grime.blend_type = "RGBA", "MULTIPLY"
+    grime.inputs[7].default_value = srgb(0.45, 0.43, 0.40)
+    bump = new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.25
+    bump.inputs["Distance"].default_value = 0.004
+    bsdf = new("ShaderNodeBsdfPrincipled")
+    bsdf.inputs["Roughness"].default_value = 0.78
+    out = new("ShaderNodeOutputMaterial")
+    link_(coords.outputs["Object"], speckle.inputs["Vector"])
+    link_(coords.outputs["Object"], blotch.inputs["Vector"])
+    link_(speckle.outputs["Fac"], dots.inputs["Fac"])
+    link_(dots.outputs["Color"], tint.inputs[6])
+    link_(blotch.outputs["Color"], tint.inputs[7])
+    link_(ao.outputs["AO"], exposed.inputs[1])
+    link_(exposed.outputs[0], grime.inputs[0])
+    link_(tint.outputs[2], grime.inputs[6])
+    link_(grime.outputs[2], bsdf.inputs["Base Color"])
+    link_(speckle.outputs["Fac"], bump.inputs["Height"])
+    link_(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    link_(bsdf.outputs[0], out.inputs[0])
+    return m
+
+
+def logo_jelly():
+    """Slock's red jelly: glossy under a clear coat, lit through, glowing a touch."""
+    m = bpy.data.materials.new("logo_jelly")
+    m.use_nodes = True  # Blender 4 (5 always uses nodes)
+    b = m.node_tree.nodes.get("Principled BSDF")
+    b.inputs["Base Color"].default_value = srgb(1.0, 0.13, 0.12)
+    b.inputs["Roughness"].default_value = 0.12
+    b.inputs["Subsurface Weight"].default_value = 1.0
+    b.inputs["Subsurface Radius"].default_value = (0.9, 0.08, 0.06)
+    b.inputs["Subsurface Scale"].default_value = 0.25
+    b.inputs["Coat Weight"].default_value = 1.0
+    b.inputs["Coat Roughness"].default_value = 0.03
+    b.inputs["Emission Color"].default_value = srgb(1.0, 0.1, 0.08)
+    b.inputs["Emission Strength"].default_value = 0.15
+    return m
+
+
+def build_logo():
+    """Render the wordmark, on a transparent background, to textures/logo.png."""
+    sc = reset()
+    concrete, jelly = logo_concrete(), logo_jelly()
+    x, o_centre = 0.0, None
+    for i, (outlines, width) in enumerate(logo_letters()):
+        cu = bpy.data.curves.new(f"letter{i}", "CURVE")
+        cu.dimensions, cu.fill_mode = "2D", "BOTH"
+        cu.extrude = LOGO_DEPTH
+        cu.bevel_depth, cu.offset, cu.bevel_resolution = LOGO_EDGE, -LOGO_EDGE, 3
+        for outline in outlines:
+            sp = cu.splines.new("POLY")
+            sp.points.add(len(outline) - 1)
+            for k, v in enumerate(outline):
+                sp.points[k].co = (v.x + x, v.y, 0, 1)
+            sp.use_cyclic_u = True
+        cu.materials.append(concrete)
+        letter = link(bpy.data.objects.new(f"letter{i}", cu))
+        letter.rotation_euler = (math.radians(90), 0, 0)       # stand it up, facing -Y
+        if i == 2:
+            o_centre = x + width / 2
+        x += width + LOGO_GAP
+    total = x - LOGO_GAP
+
+    # Slock in the O's counter, standing a little proud of the letters.
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=0.40)
+    me = bpy.data.meshes.new("slock")
+    bm.to_mesh(me)
+    bm.free()
+    for p in me.polygons:
+        p.use_smooth = True
+    me.materials.append(jelly)
+    cube = link(bpy.data.objects.new("slock", me))
+    cube.location = (o_centre, -LOGO_DEPTH - 0.10, 0.5)
+    rounding = cube.modifiers.new("bevel", "BEVEL")
+    rounding.width, rounding.segments = 0.064, 6
+    cube.modifiers.new("normals", "WEIGHTED_NORMAL")
+
+    target = Vector((total / 2, 0, 0.47))
+
+    def aim(ob, at):
+        ob.rotation_euler = (target - Vector(at)).to_track_quat("-Z", "Y").to_euler()
+        ob.location = at
+
+    cam = link(bpy.data.objects.new("cam", bpy.data.cameras.new("cam")))
+    cam.data.lens = 85
+    aim(cam, (total / 2, -15.5, 2.5))
+    sc.camera = cam
+    for name, at, power, size, colour in [("key", (-1.5, -6, 6), 900, 4, (1.0, 0.96, 0.9)),   # warm, high left
+                                          ("fill", (8, -7, 1.5), 250, 5, (0.85, 0.92, 1.0)),  # cool, low right
+                                          ("rim", (3, 5, 5), 600, 6, (1, 1, 1))]:             # behind, for the edges
+        light = bpy.data.lights.new(name, "AREA")
+        light.energy, light.size, light.color = power, size, colour
+        aim(link(bpy.data.objects.new(name, light)), at)
+    sc.world.use_nodes = True  # Blender 4
+    sc.world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.02, 0.02, 0.022, 1)
+
+    sc.render.resolution_x, sc.render.resolution_y = 2560, 640
+    sc.render.film_transparent = True
+    sc.cycles.samples = 32 if QUICK else 256
+    sc.cycles.use_denoising = True
+    sc.view_settings.view_transform = "AgX"
+    sc.view_settings.look = "AgX - Medium High Contrast"
+    sc.render.image_settings.file_format = "PNG"
+    sc.render.image_settings.color_mode = "RGBA"
+    sc.render.image_settings.color_depth = "8"
+    sc.render.filepath = os.path.join(ROOT, "textures", "logo.png")
+    bpy.ops.render.render(write_still=True)
+    print("logo", sc.render.filepath)
+
+
 def main():
     def wanted(*parts):
         return ONLY is None or any(p in ONLY for p in parts)
@@ -1204,6 +1414,8 @@ def main():
             bake_set(name, build, **options)
     if wanted("pickups"):
         build_pickups()
+    if wanted("logo"):
+        build_logo()
 
 
 main()
