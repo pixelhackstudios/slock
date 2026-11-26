@@ -39,6 +39,8 @@ Make the top ten and your name goes on the leaderboard (it's kept on your comput
 | **Mouse** (or gamepad left stick) | Tilt the world |
 | **Left click** (**A** on a gamepad) | Aim a slug — again to fire |
 | **Right click** (**B** on a gamepad) | Cancel aiming (keeps the slug) |
+| **W** (gamepad right trigger) | Brake — the trigger is gentle to firm, a full pull holds Slock still |
+| **Hold Space** and move the mouse (gamepad right stick) | Look around the maze |
 | **H** | How to play (from the title screen) |
 | **Esc** | Pause |
 | **R** | Restart |
